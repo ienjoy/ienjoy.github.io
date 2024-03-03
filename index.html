@@ -3,67 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Contact Us & About Us</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      margin: 20px;
-    }
-    .section {
-      margin-bottom: 50px;
-    }
-    h2 {
-      text-align: center;
-    }
-    .contact-form {
-      display: flex;
-      flex-direction: column;
-      width: 50%;
-      margin: 0 auto;
-    }
-    .contact-form input,
-    .contact-form textarea {
-      padding: 10px;
-      margin-bottom: 10px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-      width: 100%;
-    }
-    .contact-form button {
-      background-color: #4CAF50;
-      color: white;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    .about-us p {
-      text-indent: 2em;
-    }
-  </style>
+  <title>Contact Form</title>
 </head>
 <body>
-
-  <div class="section">
-    <h2>Contact Us</h2>
-    <p>Get in touch with us using the form below.</p>
-    <form class="contact-form">
-      <label for="name">Name:</label>
-      <input type="text" id="name" name="name" placeholder="Your Name">
-      <label for="email">Email:</label>
-      <input type="email" id="email" name="email" placeholder="Your Email">
-      <label for="message">Message:</label>
-      <textarea id="message" name="message" placeholder="Write your message here"></textarea>
-      <button type="submit">Send Message</button>
-    </form>
-  </div>
-
-  <div class="section">
-    <h2>About Us</h2>
-    <p>Here's a brief introduction about us. Replace this text with your own company or project description.</p>
-    <p>We are a team of passionate individuals dedicated to [your mission or goal]. We strive to [what you value or aim for].</p>
-    <p>Feel free to explore our website to learn more about our work and what we offer.</p>
-  </div>
-
+  <h1>Contact Us</h1>
+  <form action="process_contact.py" method="post">
+    <label for="name">Name:</label>
+    <input type="text" id="name" name="name" placeholder="Your Name" required>
+    <br>
+    <label for="email">Email:</label>
+    <input type="email" id="email" name="email" placeholder="Your Email" required>
+    <br>
+    <label for="message">Message:</label>
+    <textarea id="message" name="message" placeholder="Write your message here" required></textarea>
+    <br>
+    <button type="submit">Send Message</button>
+  </form>
 </body>
 </html>
