@@ -1,0 +1,54 @@
+.container-results {
+  min-height: 360px;
+  position: relative;
+  z-index: 0;
+}
+
+.weather-icon {
+  display: inline-block;
+  width: 55px;
+  height: 55px;
+  background-size: cover;
+  margin-left: 15px;
+}
+
+.weather-icon-clear {
+  background-image: url("../../images/002-sun.png");
+}
+.weather-icon-cloudy {
+  background-image: url("../../images/011-cloudy.png");
+}
+
+.weather-icon-mcloudy {
+  background-image: url("../../images/008-clouds.png");
+}
+
+.weather-icon-pcloudy {
+  background-image: url("../../images/003-cloudy-day.png");
+}
+
+.weather-icon-rainsnow {
+  background-image: url("../../images/freezing-rain.png");
+}
+
+.weather-icon-humid {
+  background-image: url("../../images/humidity.png");
+}
+
+.weather-icon-shower {
+  background-image: url("../../images/012-rain-2.png");
+}
+
+.weather-icon-rain {
+  background-image: url("../../images/009-rain.png");
+}
+
+.weather-icon-lightrain {
+  background-image: url("../../images/007-rain-drops.png");
+}
+.weather-icon-snow {
+  background-image: url("../../images/006-snowing.png");
+}
+.weather-icon-thunderstorm {
+  background-image: url("../../images/005-storm.png");
+}
