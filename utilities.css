@@ -1,0 +1,40 @@
+/* reusable helper classes */
+
+.mt-15 {
+  margin-top: 15px;
+}
+
+.mt-30 {
+  margin-top: 30px;
+}
+
+.mb-15 {
+  margin-bottom: 15px;
+}
+
+.mb-30 {
+  margin-bottom: 30px;
+}
+
+.rounded-edges {
+  border-radius: 15px;
+}
+
+.rounded-hr {
+  border-width: 7px;
+  width: 30%;
+  margin: 0 auto;
+  color: #fff;
+  opacity: 0.6;
+}
+
+.box-shadow {
+  box-shadow: 9px 7px 17px -12px rgba(0, 0, 0, 0.75);
+  -webkit-box-shadow: 9px 7px 17px -12px rgba(0, 0, 0, 0.75);
+  -moz-box-shadow: 9px 7px 17px -12px rgba(0, 0, 0, 0.75);
+}
+
+.text-shadow {
+  text-shadow: -1px -1px 1px rgba(255, 255, 255, 0.1),
+    1px 1px 1px rgba(0, 0, 0, 0.5), 2px 2px 5px rgba(145, 144, 144, 0.4);
+}
