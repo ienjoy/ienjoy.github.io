@@ -12,6 +12,24 @@
         "country": "United States"
       },
     {
+    "latitude": 31.2304,
+    "longitude": 121.4737,
+    "city": "Shanghai",
+    "country": "China"
+  },
+  {
+    "latitude": 39.9161,
+    "longitude": 116.3972,
+    "city": "Beijing",
+    "country": "China"
+  },
+  {
+    "latitude": 37.7749,
+    "longitude": -122.4194,
+    "city": "San Francisco",
+    "country": "United States"
+  },
+    {
         "latitude": 39.933,
         "longitude": 32.859,
         "city": "Ankara",
