@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPT-3 计算规模、信息流与能耗</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {
+    delimiters: [
+      {left: '$$', right: '$$', display: true},
+      {left: '$', right: '$', display: false}
+    ],
+    throwOnError: false
+  });"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e2e4ed;
+    --muted: #8b8fa8;
+    --accent: #5b8af0;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --code-bg: #12151f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', 'Noto Serif SC', serif;
+    font-size: 16px;
+    line-height: 1.8;
+    padding: 2rem 1rem;
+  }
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.4rem;
+    line-height: 1.3;
+  }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 2.4rem 0 0.8rem;
+    padding-left: 0.8rem;
+    border-left: 3px solid var(--accent);
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 1.8rem 0 0.6rem;
+  }
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--yellow);
+    margin: 1.4rem 0 0.4rem;
+  }
+  p {
+    margin: 0.7rem 0;
+  }
+  blockquote {
+    border-left: 3px solid var(--green);
+    background: #0d1f17;
+    color: var(--green);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 6px 6px 0;
+    font-style: normal;
+  }
+  blockquote p { margin: 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  th {
+    background: var(--surface);
+    color: var(--accent);
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 600;
+  }
+  td {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  tr:nth-child(even) td { background: #13161f; }
+  code {
+    background: var(--code-bg);
+    color: #7dd3fc;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin: 1.1rem 0;
+  }
+  pre code {
+    background: none;
+    color: #94a3b8;
+    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+  ul, ol {
+    padding-left: 1.6rem;
+    margin: 0.6rem 0;
+  }
+  li { margin: 0.3rem 0; }
+  strong { color: #fff; }
+  .katex-display {
+    overflow-x: auto;
+    padding: 0.4rem 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+    font-style: italic;
+  }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.4rem;
+    margin: 1.5rem 0 2rem;
+    font-size: 0.93rem;
+  }
+  .toc-title {
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .toc a {
+    color: var(--muted);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+  .toc a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>GPT-3 计算规模、信息流与能耗</h1>
+<blockquote>
+<p>整合自对话记录与 GPT3.md 文件，涵盖 GPT-3 架构参数、完整前向传播数值演示、各层矩阵运算规模，以及 FLOPs 与电能消耗的关系。</p>
+</blockquote>
+<hr />
+<h2>一、GPT-3 基本参数（来自 GPT3.md）</h2>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>模型名称</td>
+<td>GPT-3</td>
+</tr>
+<tr>
+<td>发布机构</td>
+<td>OpenAI</td>
+</tr>
+<tr>
+<td>发布日期</td>
+<td>2020-06-11</td>
+</tr>
+<tr>
+<td>训练 token 数</td>
+<td>3000 亿（$3 \times 10^{11}$）</td>
+</tr>
+<tr>
+<td>词表大小 $\|V\|$</td>
+<td>50,527</td>
+</tr>
+<tr>
+<td>总参数量</td>
+<td>1750 亿（$1.75 \times 10^{11}$）</td>
+</tr>
+<tr>
+<td>层数</td>
+<td>96</td>
+</tr>
+<tr>
+<td>模型维度 $d_{model}$</td>
+<td>12,288</td>
+</tr>
+<tr>
+<td>注意力头数</td>
+<td>96</td>
+</tr>
+<tr>
+<td>每头维度</td>
+<td>128（= 12288 ÷ 96）</td>
+</tr>
+<tr>
+<td>FFN 中间维度</td>
+<td>49,152（= 12288 × 4）</td>
+</tr>
+<tr>
+<td>Batch size</td>
+<td>3,200,000 tokens</td>
+</tr>
+<tr>
+<td>学习率</td>
+<td>6e-05</td>
+</tr>
+<tr>
+<td>训练硬件</td>
+<td>V100 GPU</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>二、batch_size × 维度：这个乘积意味着什么？</h2>
+<p>$$3,200,000 \text{ (tokens)} \times 12,288 \text{ (dims)} \approx 3.93 \times 10^{10} \text{ (elements)}$$</p>
+<p>这个乘积体现在三个方面：</p>
+<p><strong>1. 显存压力</strong></p>
+<p>使用 FP16（每个数占 2 字节），仅存储一层的激活值就需要：</p>
+<p>$$3.2 \times 10^6 \times 12288 \times 2 \text{ 字节} \approx \textbf{78.6 GB}$$</p>
+<p>一张 H100（80GB 显存）几乎被一层的中间结果撑满。这直接决定了模型必须使用张量并行或数据并行，将 320 万个 token 分散到成百上千块显卡上。</p>
+<p><strong>2. 矩阵乘法的规模</strong></p>
+<p>每一层的核心运算 $Y = XW$：</p>
+<ul>
+<li>输入 $X$：$[3,200,000,\ 12,288]$（极其"高瘦"的矩阵，每行代表一个 token）</li>
+<li>权重 $W$：$[12,288,\ 12,288]$（方阵）</li>
+<li>输出 $Y$：$[3,200,000,\ 12,288]$</li>
+</ul>
+<p><strong>3. 梯度下降的平滑度</strong></p>
+<p>320 万个 token 的梯度平均，统计信息足够丰富，支撑模型使用较大学习率（6e-05）而不崩溃。</p>
+<hr />
+<h2>三、完整前向传播：用具体数值走一遍</h2>
+<blockquote>
+<p>先追踪 <strong>1 个 token</strong>，感受形状；最后乘以 batch size 感受总规模。</p>
+</blockquote>
+<h3>第一步：Embedding 查表</h3>
+<p>$$E \text{ 的形状} = [50527,\ 12288] \quad \text{参数量} = 50527 \times 12288 = \textbf{6.2 亿}$$</p>
+<p>取出第 42 行，得到初始向量：</p>
+<p>$$x_0 \text{ 的形状} = [1,\ 12288]$$</p>
+<p>加位置编码（形状不变）：</p>
+<p>$$x_0 = \text{Embedding} + \text{PositionalEncoding} \quad [1,\ 12288]$$</p>
+<hr />
+<h3>第二步：一层 Transformer Block 的完整计算</h3>
+<h4>Layer Norm</h4>
+<p>形状不变：$[1,\ 12288] \rightarrow [1,\ 12288]$</p>
+<h4>Multi-Head Attention：4 次大矩阵乘法</h4>
+<p><strong>生成 Q、K、V（各一次）：</strong></p>
+<p>$$Q = x \cdot W_Q \quad [1,\ 12288] \times [12288,\ 12288] \rightarrow [1,\ 12288]$$</p>
+<p>$W_Q,\ W_K,\ W_V$ 各有参数量：$12288^2 = \textbf{1.51 亿}$</p>
+<p><strong>切分为 96 个头，每头 128 维：</strong></p>
+<p>$$[1,\ 12288] \rightarrow \text{96 个头，每头} [1,\ 128]$$</p>
+<p><strong>每头计算注意力得分：</strong></p>
+<p>$$\text{score} = Q_{head} \cdot K_{head}^T = [1,128] \cdot [128,1] = \text{一个标量}$$</p>
+<p>Softmax 后加权求和，每头输出 $[1,\ 128]$，96 头拼接回 $[1,\ 12288]$。</p>
+<blockquote>
+<p><strong>以下展开多头注意力的完整计算细节。</strong></p>
+</blockquote>
+<hr />
+<h4>多头注意力完整计算（以"黑猫睡"为例，计算"睡"的输出）</h4>
+<p><strong>教科书公式 8.10～8.14：</strong></p>
+<p>$$q_i = x_i W^Q \quad k_j = x_j W^K \quad v_j = x_j W^V \tag{8.10}$$</p>
+<p>$$\text{score}(x_i, x_j) = \frac{q_i \cdot k_j}{\sqrt{d_k}} \tag{8.11}$$</p>
+<p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \quad \forall j \leq i \tag{8.12}$$</p>
+<p>$$\text{head}_i = \sum_{j \leq i} \alpha_{ij} v_j \tag{8.13}$$</p>
+<p>$$a_i = \text{head}_i W^O \tag{8.14}$$</p>
+<p><strong>Step 1：生成 Q、K、V</strong></p>
+<p>每个头的 $W^Q$ 是从完整 $[12288,\ 12288]$ 矩阵里切出的 $[12288,\ 128]$ 部分：</p>
+<p>$$q_3 = x_3 \cdot W^Q \quad [1,\ 128] \leftarrow [1,\ 12288] \times [12288,\ 128]$$</p>
+<p>$$q_3 = [0.5,\ 0.2,\ -0.1,\ \ldots] \quad \text{（128个数）}$$</p>
+<p>$$k_1 = [0.4,\ 0.7,\ 0.1,\ \ldots] \quad v_1 = [0.3,\ -0.1,\ 0.5,\ \ldots] \quad \text{（"黑"）}$$</p>
+<p>$$k_2 = [0.6,\ 0.3,\ -0.2,\ \ldots] \quad v_2 = [0.1,\ 0.8,\ 0.2,\ \ldots] \quad \text{（"猫"）}$$</p>
+<p>$$k_3 = [0.2,\ 0.5,\ 0.4,\ \ldots] \quad v_3 = [0.6,\ 0.2,\ -0.3,\ \ldots] \quad \text{（"睡"自己）}$$</p>
+<p><strong>Step 2：计算得分（除以 $\sqrt{128} \approx 11.3$ 防止梯度消失）</strong></p>
+<p>$$\text{score}(x_3, x_1) = \frac{0.33}{11.3} \approx 0.029$$</p>
+<p>$$\text{score}(x_3, x_2) = \frac{0.52}{11.3} \approx 0.046$$</p>
+<p>$$\text{score}(x_3, x_3) = \frac{0.71}{11.3} \approx 0.063$$</p>
+<p><strong>Step 3：Softmax 归一化</strong></p>
+<p>$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.319,\ 0.328,\ 0.353]$$</p>
+<table>
+<thead>
+<tr>
+<th>词</th>
+<th>注意力权重</th>
+<th>解读</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"黑"</td>
+<td>31.9%</td>
+<td>"睡"对"黑"的关注程度</td>
+</tr>
+<tr>
+<td>"猫"</td>
+<td>32.8%</td>
+<td>"睡"对"猫"的关注程度</td>
+</tr>
+<tr>
+<td>"睡"自己</td>
+<td>35.3%</td>
+<td>"睡"对自身的关注程度</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Step 4：加权求和，得到单头输出（公式 8.13）</strong></p>
+<p>$$\text{head}_3 = 0.319 \times v_1 + 0.328 \times v_2 + 0.353 \times v_3$$</p>
+<p>第1维：$0.319 \times 0.3 + 0.328 \times 0.1 + 0.353 \times 0.6 = 0.341$</p>
+<p>第2维：$0.319 \times (-0.1) + 0.328 \times 0.8 + 0.353 \times 0.2 = 0.301$</p>
+<p>$$\text{head}_3 = [0.341,\ 0.301,\ \ldots] \quad \text{（128个数，第1头的输出）}$$</p>
+<p><strong>Step 5：96个头拼接</strong></p>
+<pre><code>第1头：  [0.341, 0.301, ..., ]   → 128个数
+第2头：  [0.112, -0.205, ..., ]  → 128个数
+...
+第96头： [0.223, 0.671, ..., ]   → 128个数
+</code></pre>
+<p>$$96 \times 128 = 12288 \quad \Rightarrow \quad \text{concat} = [0.341,\ 0.301,\ \ldots,\ 0.223,\ 0.671,\ \ldots] \quad \text{（12288个数）}$$</p>
+<p><strong>多头注意力完整流程图：</strong></p>
+<pre><code>x₃（&quot;睡&quot;）[1, 12288]
+       │
+   ┌───┴──────────── 96个头并行 ──────────────┐
+   │                                           │
+ 头1 × W^Q[12288,128]   头2 ...             头96
+ → q₃[1,128]
+   ├── × W^K → k₁,k₂,k₃ [1,128]
+   ├── × W^V → v₁,v₂,v₃ [1,128]
+   ├── score = q₃·kⱼ / √128
+   ├── softmax → α₃₁,α₃₂,α₃₃
+   └── Σαⱼ·vⱼ → head₁ [1,128]
+   │                                           │
+   └──────── 拼接 concat ─────────────────────┘
+             [1, 12288]（= 96 × 128）
+</code></pre>
+<hr />
+<p><strong>O 投影（第 4 次矩阵乘法）：</strong></p>
+<p>$$[1,\ 12288] \cdot W_O[12288,\ 12288] \rightarrow [1,\ 12288]$$</p>
+<p>$W_O$ 参数量也是 1.51 亿。</p>
+<blockquote>
+<p><strong>O 投影的作用</strong>：96 个头拼接后只是简单堆叠，$W_O$ 对来自不同头的信息进行"融合"，让不同角度的语义信息真正混合在一起。</p>
+</blockquote>
+<p><strong>Attention 层共 4 次矩阵乘法，参数量：</strong></p>
+<p>$$4 \times 12288^2 = \textbf{6.04 亿}$$</p>
+<h4>残差连接</h4>
+<p>$$x_1 = x_0 + \text{attn\_out} \quad [1,\ 12288]$$</p>
+<h4>FFN：2 次矩阵乘法，中间维度扩大 4 倍</h4>
+<p><strong>第一次——升维（$\times 4$）：</strong></p>
+<p>$$[1,\ 12288] \cdot W_1[12288,\ 49152] \rightarrow [1,\ 49152]$$</p>
+<p>$$W_1 \text{ 参数量} = 12288 \times 49152 = \textbf{6.04 亿}$$</p>
+<p><strong>激活函数 GELU（形状不变）：</strong></p>
+<p>$$[1,\ 49152] \rightarrow [1,\ 49152]$$</p>
+<p><strong>第二次——降维：</strong></p>
+<p>$$[1,\ 49152] \cdot W_2[49152,\ 12288] \rightarrow [1,\ 12288]$$</p>
+<p>$$W_2 \text{ 参数量} = 49152 \times 12288 = \textbf{6.04 亿}$$</p>
+<p><strong>FFN 层 2 次矩阵乘法，参数量合计：</strong></p>
+<p>$$2 \times 12288 \times 49152 = \textbf{12.08 亿}$$</p>
+<p><strong>FFN 相当于 8 个 $[12288 \times 12288]$ 的大小——贡献了模型约 2/3 的参数量和计算量。</strong></p>
+<h4>一层 Block 参数量汇总</h4>
+<table>
+<thead>
+<tr>
+<th>组件</th>
+<th>参数量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$W_Q$</td>
+<td>1.51 亿</td>
+</tr>
+<tr>
+<td>$W_K$</td>
+<td>1.51 亿</td>
+</tr>
+<tr>
+<td>$W_V$</td>
+<td>1.51 亿</td>
+</tr>
+<tr>
+<td>$W_O$</td>
+<td>1.51 亿</td>
+</tr>
+<tr>
+<td>$W_1$（FFN 升维）</td>
+<td>6.04 亿</td>
+</tr>
+<tr>
+<td>$W_2$（FFN 降维）</td>
+<td>6.04 亿</td>
+</tr>
+<tr>
+<td><strong>一层合计</strong></td>
+<td><strong>18.1 亿</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3>第三步：96 层累计参数量</h3>
+<p>$$96 \times 18.1\text{亿} = \textbf{1,738 亿}$$</p>
+<p>加上 Embedding 矩阵 6.2 亿，合计约 <strong>1750 亿参数</strong>。✓ 与 GPT-3 标称一致。</p>
+<hr />
+<h3>第四步：Unembedding + Softmax</h3>
+<p>$$h_{\text{final}} [1,\ 12288] \cdot U[12288,\ 50527] \rightarrow [1,\ 50527]$$</p>
+<p>Softmax 后得到 50,527 个词的概率分布，取最大值得到预测的下一个词。</p>
+<hr />
+<h3>完整数据流</h3>
+<pre><code>1个token（id=42）
+   ↓ Embedding [50527, 12288]
+x₀: [1, 12288]
+   ↓ × 96层，每层：
+   │
+   ├─ Layer Norm → [1, 12288]
+   ├─ × W_Q [12288,12288] → Q: [1,12288] → 96头，每头[1,128]
+   ├─ × W_K [12288,12288] → K: [1,12288] → 96头，每头[1,128]
+   ├─ × W_V [12288,12288] → V: [1,12288] → 96头，每头[1,128]
+   ├─ 注意力得分+加权求和 → 每头[1,128] → 拼接[1,12288]
+   ├─ × W_O [12288,12288] → [1,12288]
+   ├─ ⊕ 残差连接 → [1,12288]
+   ├─ Layer Norm → [1,12288]
+   ├─ × W₁ [12288,49152] → [1,49152]
+   ├─ GELU → [1,49152]
+   ├─ × W₂ [49152,12288] → [1,12288]
+   └─ ⊕ 残差连接 → [1,12288]
+   ↓ 96层后
+h_final: [1, 12288]
+   ↓ × U [12288, 50527]
+logits: [1, 50527]
+   ↓ Softmax
+概率分布：50,527个词各自的概率
+</code></pre>
+<hr />
+<h2>四、乘上 Batch Size：真实训练规模</h2>
+<p>训练时 320 万个 token 同时处理，每次大矩阵乘法的实际形状：</p>
+<table>
+<thead>
+<tr>
+<th>矩阵乘法</th>
+<th>形状</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$X \cdot W_Q$</td>
+<td>$[3200000,\ 12288] \times [12288,\ 12288]$</td>
+</tr>
+<tr>
+<td>$X \cdot W_1$</td>
+<td>$[3200000,\ 12288] \times [12288,\ 49152]$</td>
+</tr>
+<tr>
+<td>$X \cdot W_2$</td>
+<td>$[3200000,\ 49152] \times [49152,\ 12288]$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>一次 $W_Q$ 乘法的 FLOPs：</strong></p>
+<p>$$2 \times 3,200,000 \times 12,288 \times 12,288 \approx \textbf{966 万亿次}$$</p>
+<p><strong>一层 Block 共 6 次大矩阵乘法：</strong></p>
+<p>$$6 \times 966\text{万亿} \approx \textbf{5,800 万亿次}$$</p>
+<p><strong>96 层全部走完（前向传播）：</strong></p>
+<p>$$96 \times 5800\text{万亿} \approx 5.57 \times 10^{17} \text{ 次}$$</p>
+<p><strong>加上反向传播（约为前向的 2 倍），一个 step 总计：</strong></p>
+<p>$$\approx 1.67 \times 10^{18} \text{ 次浮点运算}$$</p>
+<hr />
+<h2>五、FLOPs 与电能消耗的关系</h2>
+<h3>连接 FLOPs 和电能的桥梁</h3>
+<p>核心指标是<strong>能效比</strong>：</p>
+<p>$$\text{能效} = \frac{\text{FLOP/s}}{\text{Watt}}$$</p>
+<p>根据 Epoch AI 研究，GPU/TPU 能效历史上每两年翻一倍。以 FP16 格式，NVIDIA H100 达到每瓦 $1.4 \times 10^{12}$ FLOP/s，Meta MTIA 达到 $2.1 \times 10^{12}$ FLOP/s。</p>
+<h3>换算公式</h3>
+<p>$$\text{电能（焦耳）} = \frac{\text{总 FLOPs}}{\text{FLOP/s per Watt}}$$</p>
+<p>$$\text{电度数（kWh）} = \frac{\text{电能（焦耳）}}{3,600,000}$$</p>
+<h3>用 GPT-3 真实数字推算</h3>
+<p>训练用 V100 GPU，能效约 $4.7 \times 10^{11}$ FLOP/s per Watt（功耗 300W，吞吐 $1.4 \times 10^{14}$ FLOP/s）。</p>
+<p><strong>总训练 steps：</strong></p>
+<p>$$\text{总 steps} = \frac{3 \times 10^{11} \text{ tokens}}{3.2 \times 10^6 \text{ tokens/step}} \approx 93,750 \text{ steps}$$</p>
+<p><strong>单 step 耗时</strong>（假设 1024 张 V100）：</p>
+<p>$$\frac{1.67 \times 10^{18}}{1024 \times 1.4 \times 10^{14}} \approx 11.6 \text{ 秒}$$</p>
+<p><strong>单 step 电能：</strong></p>
+<p>$$1024 \times 300W \times 11.6s \approx 0.99 \text{ kWh}$$</p>
+<p><strong>训练总电能（理论下限）：</strong></p>
+<p>$$93,750 \times 0.99 \approx \textbf{93 MWh}$$</p>
+<h3>理论值 vs 实测值</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>理论下限（纯计算）</td>
+<td>93 MWh</td>
+</tr>
+<tr>
+<td>实测消耗</td>
+<td><strong>1,287 MWh</strong></td>
+</tr>
+<tr>
+<td>差距倍数</td>
+<td>约 14 倍</td>
+</tr>
+</tbody>
+</table>
+<p>差距来源：</p>
+<table>
+<thead>
+<tr>
+<th>额外开销</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PUE（数据中心能效系数）</td>
+<td>散热、照明、网络等，通常使总用电乘以 1.2～1.5 倍</td>
+</tr>
+<tr>
+<td>GPU 利用率不足</td>
+<td>等待通信和 IO 的时间也在耗电</td>
+</tr>
+<tr>
+<td>梯度检查点、重算</td>
+<td>为节省显存，部分激活值需重新计算</td>
+</tr>
+<tr>
+<td>网络通信开销</td>
+<td>数千张 GPU 之间同步梯度</td>
+</tr>
+<tr>
+<td>训练不稳定、重启</td>
+<td>训练中途崩溃重启浪费电力</td>
+</tr>
+</tbody>
+</table>
+<h3>实测数据</h3>
+<p>训练 GPT-3 实际消耗约 <strong>1,287 MWh</strong> 电力，排放超过 <strong>550 公吨 CO₂e</strong>，以及超过 <strong>700 千升</strong>水用于冷却（相当于三分之二个奥运标准泳池）。</p>
+<p>训练 GPT-4 的用电量是 GPT-3 的约 <strong>16.5 倍</strong>。</p>
+<h3>推理比训练更烧钱</h3>
+<p>推理可能占模型整个生命周期能源使用的 <strong>90%</strong>。</p>
+<ul>
+<li>每次 GPT-4o 查询约消耗 <strong>0.3 Wh</strong></li>
+<li>ChatGPT 每天约 1 亿次查询：$1\text{亿} \times 0.3\text{Wh} = \textbf{30,000 kWh/天}$</li>
+<li>一年约 <strong>4 GWh</strong>，是 GPT-3 训练用电量的 <strong>3 倍</strong></li>
+</ul>
+<h3>完整换算链条</h3>
+<pre><code>总 FLOPs（计算量）
+   ÷ 硬件能效（FLOP/s per Watt）
+   = 理论最低电能（焦耳）
+   ÷ 3,600,000
+   = 理论最低电度数（kWh）
+   × PUE（数据中心效率系数，通常 1.2～1.5）
+   × 实际 GPU 利用率修正（通常除以 0.3～0.5）
+   = 实际用电量（kWh）
+   × 当地电网碳强度（kg CO₂/kWh）
+   = 碳排放量
+</code></pre>
+<h3>硬件能效在快速提升</h3>
+<p>GPU 的每瓦 FLOP/s 从 2010 年到 2024 年以每年约 <strong>1.28 倍</strong>的速度提升。如果延续，到 2030 年代末训练效率将提升 <strong>4 倍</strong>。</p>
+<hr />
+<h2>六、总结</h2>
+<blockquote>
+<p><strong>GPT-3 拥有 1750 亿参数，每个训练 step 约需 $1.67 \times 10^{18}$ 次浮点运算，一层激活值就需要 78GB 显存——这是为什么它需要数百张 GPU、数个月才能训练完成的根本原因。FLOPs 和电能之间的桥梁是硬件能效（FLOP/s per Watt）。GPT-3 训练理论用电 93 MWh，实际因散热、通信、利用率损失等开销，真实用电达 1,287 MWh——是理论值的 14 倍。推理虽然单次用电少，但因持续大规模运行，生命周期内占总用电的 90%。</strong></p>
+</blockquote>
+</div>
+</body>
+</html>
