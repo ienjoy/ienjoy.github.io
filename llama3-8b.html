@@ -441,6 +441,12 @@ Q heads 4,5,6,7     → 使用 KV head 1
 ...
 Q heads 28,29,30,31 → 使用 KV head 7
 </code></pre>
+<h4>不要把“4 个 token”和“4 个 Query head”混为一谈</h4>
+<p>前面例子中的“机器、学习、很、有趣”是 4 个 <strong>token 位置</strong>，属于序列维度 <code>seq_len=4</code>。而“每 4 个 Query head 共享 1 个 KV head”属于注意力头维度。两者彼此独立：</p>
+<pre><code class="language-text">4 个 token       → 一个 Query head 要查看的 4 个序列位置
+4 个 Query heads → 同一 GQA 分组中共享一个 KV head 的 4 个特征通道
+</code></pre>
+<p>因此，只展示一个 Query head 如何关注 4 个 token，不能证明 4Q→1KV。下面会用 <code>8 Query heads / 2 KV heads</code> 的完整玩具模型，显式展示两个 GQA 分组。</p>
 <p>如果是传统 MHA，K/V 也会有 32 个 head，KV Cache 会是 GQA 的 4 倍。</p>
 <hr />
 <h3>3. RoPE：把位置旋转进 Q 和 K</h3>
@@ -478,82 +484,482 @@ $$
 <p>直观理解：RoPE 让 “第 4 个 token 的 query” 和 “第 2 个 token 的 key” 的点积天然包含相对距离信息。</p>
 <hr />
 <h3>4. GQA 注意力计算与 FlashAttention 优化</h3>
-<p>为了讲清楚，先只看第 4 个 token “有趣” 的一个 query head。</p>
-<p>这个 query head：</p>
-<div class="math-display">$$
-q_4:[1,\ 128]
-$$
-</div>
-<p>由于是因果语言模型，它只能看前面和自己：</p>
-<pre><code class="language-text">位置 1: 机器
-位置 2: 学习
-位置 3: 很
-位置 4: 有趣
+<p>下面把真实 LLaMA-3 8B 缩小为一个仍然属于 GQA、但可以手算的模型。数值是人为设计的，只用于展示映射和计算。</p>
+<h4>4.1 玩具模型参数</h4>
+<pre><code class="language-text">输入：[&quot;机器&quot;, &quot;学习&quot;, &quot;很&quot;, &quot;有趣&quot;]
+
+batch       = 1
+seq_len     = 4
+Query heads = 8
+KV heads    = 2
+head_dim    = 2
+d_model     = 16
 </code></pre>
-<p>对应的 key：</p>
+<p>模型维度和共享比例：</p>
 <div class="math-display">$$
-k_1,k_2,k_3,k_4:[1,\ 128]
+d_{model}=n_qd_{head}=8\times2=16
 $$
 </div>
-<p>计算注意力分数：</p>
 <div class="math-display">$$
-\text{score}(4,j)=\frac{q_4 k_j^T}{\sqrt{128}}
+n_{rep}=\frac{n_q}{n_{kv}}=\frac{8}{2}=4
 $$
 </div>
-<p>假设点积得到：</p>
+<p>所以它有两个真正的 GQA 分组：</p>
+<pre><code class="language-text">Q heads 0～3 → KV head 0
+Q heads 4～7 → KV head 1
+</code></pre>
+<p>如果只有 <code>4 Query heads / 1 KV head</code>，严格分类更接近 MQA；这里采用 <code>8Q/2KV</code>，避免把 MQA 特例误称为完整 GQA。</p>
+<h4>4.2 投影与张量形状</h4>
+<p>输入：</p>
+<div class="math-display">$$
+X:[1,\ 4,\ 16]
+$$
+</div>
+<p>投影矩阵：</p>
+<div class="math-display">$$
+W_Q:[16,\ 16],\quad W_K:[16,\ 4],\quad W_V:[16,\ 4]
+$$
+</div>
+<p>拆分 head 后：</p>
+<div class="math-display">$$
+Q:[1,\ 4,\ 8,\ 2]
+$$
+</div>
+<div class="math-display">$$
+K,V:[1,\ 4,\ 2,\ 2]
+$$
+</div>
+<p>维度顺序是：</p>
+<pre><code class="language-text">Q：[batch, token位置, Query head, head_dim]
+K：[batch, token位置, KV head, head_dim]
+V：[batch, token位置, KV head, head_dim]
+</code></pre>
+<p>Q 和 K 随后应用 RoPE，V 不应用 RoPE。下面给出的 Q/K 数值视为完成投影和 RoPE 后的结果；V 是完成投影后的结果。</p>
+<h4>4.3 两个 KV head 在四个 token 位置的数据</h4>
+<p>KV head 0：</p>
 <table>
 <thead>
 <tr>
-<th>key 位置</th>
-<th style="text-align:right">原始点积</th>
-<th style="text-align:right">除以 $\sqrt{128}\approx 11.31$</th>
+<th style="text-align:right">位置 $j$</th>
+<th>token</th>
+<th>$k_{j,0}$</th>
+<th>$v_{j,0}$</th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td style="text-align:right">1</td>
 <td>机器</td>
-<td style="text-align:right">0.31</td>
-<td style="text-align:right">0.027</td>
+<td>$[1,0]$</td>
+<td>$[1,0]$</td>
 </tr>
 <tr>
+<td style="text-align:right">2</td>
 <td>学习</td>
-<td style="text-align:right">0.68</td>
-<td style="text-align:right">0.060</td>
+<td>$[0,1]$</td>
+<td>$[0,1]$</td>
 </tr>
 <tr>
+<td style="text-align:right">3</td>
 <td>很</td>
-<td style="text-align:right">0.22</td>
-<td style="text-align:right">0.019</td>
+<td>$[-1,0]$</td>
+<td>$[-1,0]$</td>
 </tr>
 <tr>
+<td style="text-align:right">4</td>
 <td>有趣</td>
-<td style="text-align:right">0.83</td>
-<td style="text-align:right">0.073</td>
+<td>$[0,-1]$</td>
+<td>$[0,-1]$</td>
 </tr>
 </tbody>
 </table>
-<p>Softmax 后：</p>
+<p>KV head 1：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">位置 $j$</th>
+<th>token</th>
+<th>$k_{j,1}$</th>
+<th>$v_{j,1}$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">1</td>
+<td>机器</td>
+<td>$[1,1]$</td>
+<td>$[2,0]$</td>
+</tr>
+<tr>
+<td style="text-align:right">2</td>
+<td>学习</td>
+<td>$[-1,1]$</td>
+<td>$[0,2]$</td>
+</tr>
+<tr>
+<td style="text-align:right">3</td>
+<td>很</td>
+<td>$[-1,-1]$</td>
+<td>$[-2,0]$</td>
+</tr>
+<tr>
+<td style="text-align:right">4</td>
+<td>有趣</td>
+<td>$[1,-1]$</td>
+<td>$[0,-2]$</td>
+</tr>
+</tbody>
+</table>
+<p>“共享一个 KV head”不是所有 token 共用一个 K/V 向量。每个 KV head 在每个 token 位置都有不同的 K/V；同组 Query head 共享的是该 KV head 的整组投影结果，以及推理时对应的 KV Cache。</p>
+<h4>4.4 第 4 个 token 的 8 个 Query head</h4>
+<p>第 4 个 token“有趣”可以看到位置 1～4。保留 batch 和 token 维度时：</p>
 <div class="math-display">$$
-\alpha = \text{softmax}([0.027,0.060,0.019,0.073])
-\approx [0.245,\ 0.253,\ 0.243,\ 0.259]
+Q_{t=4}:[1,\ 1,\ 8,\ 2]
 $$
 </div>
-<p>然后加权求和：</p>
+<p>假设它产生：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query head $h$</th>
+<th>$q_{4,h}$</th>
+<th style="text-align:right">使用的 KV head</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">0</td>
+<td>$[2,0]$</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">1</td>
+<td>$[0,2]$</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">2</td>
+<td>$[-2,0]$</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">3</td>
+<td>$[0,-2]$</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">4</td>
+<td>$[1,1]$</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td style="text-align:right">5</td>
+<td>$[-1,1]$</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td style="text-align:right">6</td>
+<td>$[-1,-1]$</td>
+<td style="text-align:right">1</td>
+</tr>
+<tr>
+<td style="text-align:right">7</td>
+<td>$[1,-1]$</td>
+<td style="text-align:right">1</td>
+</tr>
+</tbody>
+</table>
+<p>映射函数：</p>
 <div class="math-display">$$
-\text{head}_4 = 0.245v_1 + 0.253v_2 + 0.243v_3 + 0.259v_4
+g(h)=\left\lfloor\frac{h}{4}\right\rfloor
 $$
 </div>
-<p>输出仍然是：</p>
+<p>因此：</p>
+<pre><code class="language-text">Q0 ─┐
+Q1 ─┤
+Q2 ─┼── KV head 0
+Q3 ─┘
+
+Q4 ─┐
+Q5 ─┤
+Q6 ─┼── KV head 1
+Q7 ─┘
+</code></pre>
+<p>Q0～Q3 不读取 KV head 1，Q4～Q7 也不读取 KV head 0。各 Query head 之间没有顺序依赖，通常由批量张量运算同时处理，而不是轮流占用 KV head。</p>
+<p>实现时可以在逻辑上把每个 KV head 提供给组内 4 个 Query head，但不一定需要在显存中真正复制四份；GQA kernel 可以直接读取共享数据。</p>
+<h4>4.5 第一组：Q0～Q3 读取 KV head 0</h4>
+<p>计算公式：</p>
 <div class="math-display">$$
-[1,\ 128]
+s_{h,4,j}
+=
+\frac{q_{4,h}\cdot k_{j,0}}{\sqrt{2}},
+\qquad h\in\{0,1,2,3\}
 $$
 </div>
-<p>32 个 query head 都算完以后拼接：</p>
+<p>分数：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query</th>
+<th style="text-align:right">机器</th>
+<th style="text-align:right">学习</th>
+<th style="text-align:right">很</th>
+<th style="text-align:right">有趣</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">$Q_0$</td>
+<td style="text-align:right">1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">-1.414</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_1$</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">-1.414</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_2$</td>
+<td style="text-align:right">-1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.414</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_3$</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">-1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.414</td>
+</tr>
+</tbody>
+</table>
+<p>沿 token 位置做 Softmax：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query</th>
+<th style="text-align:right">机器</th>
+<th style="text-align:right">学习</th>
+<th style="text-align:right">很</th>
+<th style="text-align:right">有趣</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">$Q_0$</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right">0.038</td>
+<td style="text-align:right">0.157</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_1$</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right">0.038</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_2$</td>
+<td style="text-align:right">0.038</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+<td style="text-align:right">0.157</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_3$</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right">0.038</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+</tr>
+</tbody>
+</table>
+<p>每个 Query head 使用自己的权重，对 KV head 0 的 Value 加权：</p>
 <div class="math-display">$$
-32 \times 128 = 4096
+o_{4,h}=\sum_{j=1}^{4}\alpha_{h,4,j}v_{j,0}
 $$
 </div>
-<p>得到：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query</th>
+<th>输出</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">$Q_0$</td>
+<td>$[0.609,0]$</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_1$</td>
+<td>$[0,0.609]$</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_2$</td>
+<td>$[-0.609,0]$</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_3$</td>
+<td>$[0,-0.609]$</td>
+</tr>
+</tbody>
+</table>
+<h4>4.6 第二组：Q4～Q7 读取 KV head 1</h4>
+<div class="math-display">$$
+s_{h,4,j}
+=
+\frac{q_{4,h}\cdot k_{j,1}}{\sqrt{2}},
+\qquad h\in\{4,5,6,7\}
+$$
+</div>
+<p>分数：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query</th>
+<th style="text-align:right">机器</th>
+<th style="text-align:right">学习</th>
+<th style="text-align:right">很</th>
+<th style="text-align:right">有趣</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">$Q_4$</td>
+<td style="text-align:right">1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">-1.414</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_5$</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">-1.414</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_6$</td>
+<td style="text-align:right">-1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.414</td>
+<td style="text-align:right">0</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_7$</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">-1.414</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.414</td>
+</tr>
+</tbody>
+</table>
+<p>Softmax：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query</th>
+<th style="text-align:right">机器</th>
+<th style="text-align:right">学习</th>
+<th style="text-align:right">很</th>
+<th style="text-align:right">有趣</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">$Q_4$</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right">0.038</td>
+<td style="text-align:right">0.157</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_5$</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right">0.038</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_6$</td>
+<td style="text-align:right">0.038</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+<td style="text-align:right">0.157</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_7$</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right">0.038</td>
+<td style="text-align:right">0.157</td>
+<td style="text-align:right"><strong>0.647</strong></td>
+</tr>
+</tbody>
+</table>
+<p>对 KV head 1 的 Value 加权：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Query</th>
+<th>输出</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">$Q_4$</td>
+<td>$[1.218,0]$</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_5$</td>
+<td>$[0,1.218]$</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_6$</td>
+<td>$[-1.218,0]$</td>
+</tr>
+<tr>
+<td style="text-align:right">$Q_7$</td>
+<td>$[0,-1.218]$</td>
+</tr>
+</tbody>
+</table>
+<p>第二组的权重碰巧与第一组相同，是因为这里选用了对称向量；两组实际读取的是不同 K/V，输出也不同。真实模型中，两组的注意力权重通常不会相同。</p>
+<h4>4.7 拼接与输出投影</h4>
+<p>两个分组一共得到 8 个 head 输出：</p>
+<div class="math-display">$$
+O_{t=4}:[1,\ 1,\ 8,\ 2]
+$$
+</div>
+<p>拼接后：</p>
+<div class="math-display">$$
+[1,\ 1,\ 8,\ 2]\rightarrow[1,\ 1,\ 16]
+$$
+</div>
+<p>输出投影：</p>
+<div class="math-display">$$
+[1,\ 1,\ 16]W_O[16,\ 16]\rightarrow[1,\ 1,\ 16]
+$$
+</div>
+<p>这个玩具例子完整展示了：</p>
+<ol>
+<li>一个 KV head 被组内 4 个 Query head 共享；</li>
+<li>不同分组使用不同 KV head；</li>
+<li>同组 Query 共享 K/V，但不共享 Query、注意力权重或输出；</li>
+<li>Query 不与所有 KV head 做笛卡尔积；</li>
+<li>4 个 token 位置和 4 个 Query head 是两个独立维度。</li>
+</ol>
+<p>真实 LLaMA-3 8B 只是把两个分组扩大为八个分组，每组仍然是 4Q→1KV。32 个 Query head 计算完后拼接回 4096 维：</p>
+<div class="math-display">$$
+32\times128=4096
+$$
+</div>
 <div class="math-display">$$
 \text{attn\_concat}:[1,\ 4,\ 4096]
 $$
