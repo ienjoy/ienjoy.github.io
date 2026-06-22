@@ -181,11 +181,13 @@
 <p>所以 $q_3$ 表示第 3 个 token，也就是"睡"这个位置生成的 query 向量。这里的下标 3 是位置序号，不是第 3 维，也不是第 3 个 attention head。计算"睡"的注意力输出时，会用 $q_3$ 分别和 $k_1,k_2,k_3$ 做相似度计算。因为 GPT 是因果模型，所以第 3 个 token 只能看位置 1、2、3，不能看未来的位置 4、5、...。</p>
 
 <p><strong>教科书公式 8.10～8.14（单头模板）：</strong></p>
-<p>$$q_i = x_i W^Q \quad k_j = x_j W^K \quad v_j = x_j W^V \tag{8.10}$$</p>
+<p>$$\begin{aligned} q_i &= x_i W^Q \\ k_j &= x_j W^K \\ v_j &= x_j W^V \end{aligned} \tag{8.10}$$</p>
 <p>$$\text{score}(x_i, x_j) = \frac{q_i k_j^T}{\sqrt{d_k}} \tag{8.11}$$</p>
 <p><strong>小知识点：为什么原书写 $q_i \cdot k_j$，工程里常写 $q_i k_j^T$？</strong></p>
-<p>原书里的 $q_i \cdot k_j$ 是向量点积写法，数学上没有问题。点积符号 $\cdot$ 本身就表示两个向量逐维相乘后求和：$$q_i \cdot k_j = \sum_{m=1}^{d_k} q_{i,m} k_{j,m}$$</p>
-<p>如果把 $q_i$ 和 $k_j$ 都看成行向量（形状 $[1,d_k]$），要得到一个标量就需要转置：$$q_i k_j^T:[1,d_k]\times[d_k,1]\rightarrow[1,1]$$</p>
+<p>原书里的 $q_i \cdot k_j$ 是向量点积写法，数学上没有问题。点积符号 $\cdot$ 本身就表示两个向量逐维相乘后求和：</p>
+<p>$$q_i \cdot k_j = \sum_{m=1}^{d_k} q_{i,m} k_{j,m}$$</p>
+<p>如果把 $q_i$ 和 $k_j$ 都看成行向量（形状 $[1,d_k]$），要得到一个标量就需要转置：</p>
+<p>$$q_i k_j^T:[1,d_k]\times[d_k,1]\rightarrow[1,1]$$</p>
 <p>所以 $q_i \cdot k_j \equiv q_i k_j^T$，区别只是视角不同——前者是数学内积写法，后者是工程矩阵乘法写法，更容易和代码里的 $QK^T$ 对上。</p>
 <p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \quad \forall j \leq i \tag{8.12}$$</p>
 <p>$$\text{head}_i = \sum_{j \leq i} \alpha_{ij} v_j \tag{8.13}$$</p>
