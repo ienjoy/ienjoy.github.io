@@ -191,9 +191,26 @@
 <p>$$\text{head}_i = \sum_{j \leq i} \alpha_{ij} v_j \tag{8.13}$$</p>
 <p>$$a_i = \text{head}_i W^O \tag{8.14}$$</p>
 
+<p><strong>正确理解 8.10～8.14：这是一套完整的单头注意力公式</strong></p>
+<p>首先澄清一个容易犯的错误：8.10～8.14 本身量纲完全自洽，不存在任何问题。</p>
+<p>单头注意力的含义是：用 token 的<strong>全部 $d_{\text{model}}$ 维度</strong>跑一套 QKV 计算，整个 $d_{\text{model}}$ 就是唯一的一个头在处理。此时：</p>
+<p>$$W^Q, W^K, W^V \in \mathbb{R}^{d_{\text{model}} \times d_{\text{model}}}$$</p>
+<p>$$q_i,\ k_j,\ v_j \in \mathbb{R}^{1 \times d_{\text{model}}}$$</p>
+<p>$$\text{head}_i = \sum_{j \le i} \alpha_{ij} v_j \in \mathbb{R}^{1 \times d_{\text{model}}}$$</p>
+<p>$$a_i = \text{head}_i \cdot W^O : [1,\ d_{\text{model}}] \times [d_{\text{model}},\ d_{\text{model}}] \rightarrow [1,\ d_{\text{model}}] \quad \checkmark$$</p>
+<p>量纲完全闭合，不需要任何额外步骤。</p>
+<p>$\text{head}_i$ 里的 $i$ 是 token 位置（$j \le i$ 这个因果掩码就是证据），"head" 只是这个单头输出的名字——作者用 head 命名，是为了和多头场景的语义保持一致（多头里每个头也叫 head）。</p>
+<p><strong>单头 vs 多头的直觉区别：</strong></p>
+<table><thead><tr><th></th><th>单头注意力</th><th>多头注意力（GPT-3）</th></tr></thead><tbody>
+<tr><td>头数</td><td>1</td><td>96</td></tr>
+<tr><td>每个头处理的维度</td><td>全部 $d_{\text{model}}=12288$ 维</td><td>切分后每头 $d_{\text{head}}=128$ 维</td></tr>
+<tr><td>$W^Q$ 形状</td><td>$[12288, 12288]$</td><td>每头 $[12288, 128]$</td></tr>
+<tr><td>$\text{head}_i$ 维度</td><td>$12288$</td><td>每头 $128$，拼接后 $12288$</td></tr>
+</tbody></table>
+<p><strong>$128 \ne 12288$ 的冲突从哪里来？</strong> 只在把这套公式<strong>套用到多头场景</strong>（每头 $W^Q$ 已切成 $[12288, 128]$）却<strong>不加拼接步</strong>时才会出现。这是应用时遗漏了拼接步骤的问题，不是公式 8.10～8.14 本身的错误。</p>
 <blockquote>
-<p><strong>为什么要补一套修正公式？</strong><br>
-上面 8.10～8.14 的下标 $i,j$ 全是<strong>位置</strong>（query 位置、key/value 位置），并没有体现「多头」这个维度——它们描述的其实是<strong>单头</strong>自注意力。而且 8.13 的 $\text{head}_i$ 是 128 维单头输出，8.14 却直接对它乘 $W^O[12288,12288]$，量纲上 $128\ne12288$ 算不通：这里的 "head" 一词被重载了（一会儿指 128 维单头、一会儿指 12288 维拼接体）。下面给出把<strong>头编号</strong>与<strong>位置</strong>彻底分开、量纲自洽的显式多头版。</p>
+<p><strong>为什么还要补一套修正公式（8.10′～8.15′）？</strong><br>
+原版 8.10～8.14 是自洽的单头模板，但它<strong>没有显式体现多头</strong>——头编号不出现在任何符号里，读者无法直接看出如何扩展到多头。修正版的目的是把头编号 $(c)$ 和位置下标 $i,j$ 彻底分开写清楚，同时把缺失的拼接步骤（8.14′）和输出投影（8.15′）显式列出，让多头计算流程在符号层面完整可见。</p>
 </blockquote>
 <hr />
 
