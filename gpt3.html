@@ -142,17 +142,22 @@
 <h3>第一步：Embedding 查表</h3>
 <p>$$E \text{ 的形状} = [50527,\ 12288] \quad \text{参数量} = 50527 \times 12288 = \textbf{6.2 亿}$$</p>
 <p>取出第 42 行，得到初始向量：$x_0 \text{ 的形状} = [1,\ 12288]$</p>
-<p>加位置编码（形状不变）：$$x_0 = \text{Embedding} + \text{PositionalEncoding} \quad [1,\ 12288]$$</p>
+<p>加位置编码（形状不变）：</p>
+<p>$$x_0 = \text{Embedding} + \text{PositionalEncoding} \quad [1,\ 12288]$$</p>
 <hr />
 
 <h3>第二步：一层 Transformer Block 的完整计算</h3>
 <h4>Layer Norm</h4>
 <p>形状不变：$[1,\ 12288] \rightarrow [1,\ 12288]$</p>
 <p>这里的 Layer Norm 不是矩阵乘法，而是对当前 token 的 12288 维隐藏向量做归一化。假设当前 token 的向量是 $x = [x_1, x_2, \dots, x_{12288}]$。</p>
-<p>先计算平均值：$$\mu = \frac{1}{d}\sum_{i=1}^{d} x_i$$</p>
-<p>再计算方差：$$\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2$$</p>
-<p>然后标准化：$$\hat{x}_i = \frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}$$</p>
-<p>最后乘上可训练的缩放参数 $\gamma_i$，加上平移参数 $\beta_i$：$$y_i = \gamma_i \hat{x}_i + \beta_i$$</p>
+<p>先计算平均值：</p>
+<p>$$\mu = \frac{1}{d}\sum_{i=1}^{d} x_i$$</p>
+<p>再计算方差：</p>
+<p>$$\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2$$</p>
+<p>然后标准化：</p>
+<p>$$\hat{x}_i = \frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}$$</p>
+<p>最后乘上可训练的缩放参数 $\gamma_i$，加上平移参数 $\beta_i$：</p>
+<p>$$y_i = \gamma_i \hat{x}_i + \beta_i$$</p>
 <p>其中 $d=12288$，$\epsilon$ 防止除以 0，$\gamma$ 和 $\beta$ 的形状都是 $[12288]$。</p>
 
 <h4>Multi-Head Attention：4 次大矩阵乘法</h4>
@@ -162,7 +167,8 @@
 <p><strong>切分为 96 个头，每头 128 维：</strong></p>
 <p>$$[1,\ 12288] \rightarrow \text{96 个头，每头} [1,\ 128]$$</p>
 <p><strong>小知识点：为什么是 96 个头？</strong></p>
-<p>GPT-3 175B 的隐藏维度是 $d_{\text{model}}=12288$，注意力头数是 $n_{\text{heads}}=96$，所以每个头的维度是：$$d_{\text{head}}=\frac{d_{\text{model}}}{n_{\text{heads}}}=\frac{12288}{96}=128$$</p>
+<p>GPT-3 175B 的隐藏维度是 $d_{\text{model}}=12288$，注意力头数是 $n_{\text{heads}}=96$，所以每个头的维度是：</p>
+<p>$$d_{\text{head}}=\frac{d_{\text{model}}}{n_{\text{heads}}}=\frac{12288}{96}=128$$</p>
 <p>这里的 96 不是严格数学推导出来的最优值，更像是经验、实验和硬件效率共同作用后的设计选择。实际设计大模型时，常见做法是让每个 head 保持一个比较合适的维度，例如 64 或 128，然后根据总隐藏维度反推头数。</p>
 <ul>
 <li>头太少：注意力模式太单一。</li>
@@ -229,14 +235,16 @@
 </tbody></table>
 
 <p><strong>(8.10′) 每头各自投影</strong>（输出 128 维；完整实现为 $x_iW^{Q,(c)}+b^{Q,(c)}$，此处略去 bias）：</p>
-<p>$$q_i^{(c)} = x_i\,W^{Q,(c)},\quad k_j^{(c)} = x_j\,W^{K,(c)},\quad v_j^{(c)} = x_j\,W^{V,(c)} \tag{8.10'}$$</p>
+<p>$$\begin{aligned} q_i^{(c)} &= x_i\,W^{Q,(c)} \\ k_j^{(c)} &= x_j\,W^{K,(c)} \\ v_j^{(c)} &= x_j\,W^{V,(c)} \end{aligned} \tag{8.10'}$$</p>
 <p>$$W^{Q,(c)},W^{K,(c)},W^{V,(c)}\in\mathbb{R}^{12288\times128} \;\Rightarrow\; q_i^{(c)},k_j^{(c)},v_j^{(c)}\in\mathbb{R}^{1\times 128}$$</p>
 
 <p><strong>(8.11′) 该头内得分</strong>（缩放因子为 key 维 $\sqrt{d_k}=\sqrt{128}$）：</p>
-<p>$$\text{score}^{(c)}(x_i,x_j)=\frac{q_i^{(c)}\,\big(k_j^{(c)}\big)^{\!\top}}{\sqrt{d_k}} \qquad [1,128]\times[128,1]\to[1,1] \tag{8.11'}$$</p>
+<p>$$\text{score}^{(c)}(x_i,x_j)=\frac{q_i^{(c)}\,\big(k_j^{(c)}\big)^{\!\top}}{\sqrt{d_k}} \tag{8.11'}$$</p>
+<p>矩阵形状：$[1,128]\times[128,1]\to[1,1]$（结果为标量）</p>
 
 <p><strong>(8.12′) 因果 softmax</strong>（分母显式对 $j'\le i$ 求和，故无歧义）：</p>
-<p>$$\alpha_{ij}^{(c)}=\frac{\exp\!\big(\text{score}^{(c)}(x_i,x_j)\big)}{\displaystyle\sum_{j'\le i}\exp\!\big(\text{score}^{(c)}(x_i,x_{j'})\big)},\quad \forall\,j\le i;\qquad \alpha_{ij}^{(c)}=0\ (j>i) \tag{8.12'}$$</p>
+<p>$$\alpha_{ij}^{(c)}=\frac{\exp\!\big(\text{score}^{(c)}(x_i,x_j)\big)}{\displaystyle\sum_{j'\le i}\exp\!\big(\text{score}^{(c)}(x_i,x_{j'})\big)} \tag{8.12'}$$</p>
+<p>其中 $j \leq i$（因果掩码）；$j > i$ 时 $\alpha_{ij}^{(c)} = 0$。</p>
 
 <p><strong>(8.13′) 单头输出</strong>（128 维，下标 $i$=位置，上标 $(c)$=头）：</p>
 <p>$$\text{head}_i^{(c)}=\sum_{j\le i}\alpha_{ij}^{(c)}\,v_j^{(c)}\;\in\mathbb{R}^{1\times 128} \tag{8.13'}$$</p>
@@ -329,9 +337,11 @@
 <p>$$x_1 = x_0 + \text{attn\_out} \quad [1,\ 12288]$$</p>
 
 <h4>FFN：2 次矩阵乘法，中间维度扩大 4 倍</h4>
-<p>$$[1,\ 12288] \cdot W_1[12288,\ 49152] \rightarrow [1,\ 49152] \quad W_1 \text{ 参数量} = 12288 \times 49152 = \textbf{6.04 亿}$$</p>
+<p>$$[1,\ 12288] \cdot W_1[12288,\ 49152] \rightarrow [1,\ 49152]$$</p>
+<p>$$W_1 \text{ 参数量} = 12288 \times 49152 = \textbf{6.04 亿}$$</p>
 <p>激活函数 GELU（形状不变）：$[1,\ 49152] \rightarrow [1,\ 49152]$</p>
-<p>$$[1,\ 49152] \cdot W_2[49152,\ 12288] \rightarrow [1,\ 12288] \quad W_2 \text{ 参数量} = 49152 \times 12288 = \textbf{6.04 亿}$$</p>
+<p>$$[1,\ 49152] \cdot W_2[49152,\ 12288] \rightarrow [1,\ 12288]$$</p>
+<p>$$W_2 \text{ 参数量} = 49152 \times 12288 = \textbf{6.04 亿}$$</p>
 <p><strong>FFN 相当于 8 个 $[12288 \times 12288]$ 的大小——贡献了模型约 2/3 的参数量和计算量。</strong></p>
 
 <h4>一层 Block 参数量汇总</h4>
@@ -392,19 +402,24 @@ logits: [1, 50527]
 <p>$$2 \times 3,200,000 \times 12,288 \times 12,288 \approx \textbf{966 万亿次} \quad \text{（一次 }W_Q\text{ 乘法的 FLOPs）}$$</p>
 <p>$$6 \times 966\text{万亿} \approx \textbf{5,800 万亿次} \quad \text{（一层 Block 共 6 次大矩阵乘法）}$$</p>
 <p>$$96 \times 5800\text{万亿} \approx 5.57 \times 10^{17} \text{ 次} \quad \text{（96 层前向传播）}$$</p>
-<p>加上反向传播（约为前向的 2 倍），一个 step 总计：$$\approx 1.67 \times 10^{18} \text{ 次浮点运算}$$</p>
+<p>加上反向传播（约为前向的 2 倍），一个 step 总计：</p>
+<p>$$\approx 1.67 \times 10^{18} \text{ 次浮点运算}$$</p>
 <hr />
 
 <h2>五、FLOPs 与电能消耗的关系</h2>
 <h3>连接 FLOPs 和电能的桥梁</h3>
-<p>核心指标是<strong>能效比</strong>：$$\text{能效} = \frac{\text{FLOP/s}}{\text{Watt}}$$</p>
+<p>核心指标是<strong>能效比</strong>：</p>
+<p>$$\text{能效} = \frac{\text{FLOP/s}}{\text{Watt}}$$</p>
 <p>根据 Epoch AI 研究，GPU/TPU 能效历史上每两年翻一倍。以 FP16 格式，NVIDIA H100 达到每瓦 $1.4 \times 10^{12}$ FLOP/s，Meta MTIA 达到 $2.1 \times 10^{12}$ FLOP/s。</p>
 <h3>换算公式</h3>
-<p>$$\text{电能（焦耳）} = \frac{\text{总 FLOPs}}{\text{FLOP/s per Watt}} \qquad \text{电度数（kWh）} = \frac{\text{电能（焦耳）}}{3,600,000}$$</p>
+<p>$$\text{电能（焦耳）} = \frac{\text{总 FLOPs}}{\text{FLOP/s per Watt}}$$</p>
+<p>$$\text{电度数（kWh）} = \frac{\text{电能（焦耳）}}{3,600,000}$$</p>
 <h3>用 GPT-3 真实数字推算</h3>
 <p>训练用 V100 GPU，能效约 $4.7 \times 10^{11}$ FLOP/s per Watt（功耗 300W，吞吐 $1.4 \times 10^{14}$ FLOP/s）。</p>
-<p>$$\text{总 steps} = \frac{3 \times 10^{11}}{3.2 \times 10^6} \approx 93,750 \quad \text{单 step 耗时} = \frac{1.67 \times 10^{18}}{1024 \times 1.4 \times 10^{14}} \approx 11.6 \text{ 秒}$$</p>
-<p>$$1024 \times 300W \times 11.6s \approx 0.99 \text{ kWh/step} \qquad 93,750 \times 0.99 \approx \textbf{93 MWh（理论下限）}$$</p>
+<p>$$\text{总 steps} = \frac{3 \times 10^{11}}{3.2 \times 10^6} \approx 93,750$$</p>
+<p>$$\text{单 step 耗时} = \frac{1.67 \times 10^{18}}{1024 \times 1.4 \times 10^{14}} \approx 11.6 \text{ 秒}$$</p>
+<p>$$1024 \times 300W \times 11.6s \approx 0.99 \text{ kWh/step}$$</p>
+<p>$$93,750 \times 0.99 \approx \textbf{93 MWh（理论下限）}$$</p>
 <h3>理论值 vs 实测值</h3>
 <table><thead><tr><th></th><th>数值</th></tr></thead><tbody>
 <tr><td>理论下限（纯计算）</td><td>93 MWh</td></tr>
