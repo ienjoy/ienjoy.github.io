@@ -247,13 +247,16 @@
 <p>其中 $j \leq i$（因果掩码）；$j > i$ 时 $\alpha_{ij}^{(c)} = 0$。</p>
 
 <p><strong>(8.13′) 单头输出</strong>（128 维，下标 $i$=位置，上标 $(c)$=头）：</p>
-<p>$$\text{head}_i^{(c)}=\sum_{j\le i}\alpha_{ij}^{(c)}\,v_j^{(c)}\;\in\mathbb{R}^{1\times 128} \tag{8.13'}$$</p>
+<p>$$\text{head}_i^{(c)}=\sum_{j\le i}\alpha_{ij}^{(c)}\,v_j^{(c)} \tag{8.13'}$$</p>
+<p>输出维度：$\text{head}_i^{(c)}\in\mathbb{R}^{1\times 128}$（下标 $i$=位置，上标 $(c)$=头）。</p>
 
 <p><strong>(8.14′) 跨头拼接</strong>（原文缺失、修正核心：头上标在此被收掉，结果只剩位置下标）：</p>
-<p>$$o_i=\operatorname{Concat}\!\big(\text{head}_i^{(1)},\dots,\text{head}_i^{(h)}\big)\in\mathbb{R}^{1\times 12288} \tag{8.14'}$$</p>
+<p>$$o_i=\operatorname{Concat}\!\big(\text{head}_i^{(1)},\dots,\text{head}_i^{(h)}\big) \tag{8.14'}$$</p>
+<p>输出维度：$o_i\in\mathbb{R}^{1\times 12288}$（$h$ 个 128 维向量拼接）。</p>
 
 <p><strong>(8.15′) 输出投影</strong>（$W^O$ 作用在<strong>拼接后</strong>的 12288 维上，量纲自洽；完整实现含 $+b^O$）：</p>
-<p>$$a_i = o_i\,W^O,\qquad W^O\in\mathbb{R}^{12288\times12288}\;\Rightarrow\; a_i\in\mathbb{R}^{1\times 12288} \tag{8.15'}$$</p>
+<p>$$a_i = o_i\,W^O \tag{8.15'}$$</p>
+<p>其中 $W^O\in\mathbb{R}^{12288\times12288}$，结果 $a_i\in\mathbb{R}^{1\times 12288}$。</p>
 
 <blockquote><p>对照原文：$a_i=\text{head}_i W^O$ 之所以算不通，正是因为 $\text{head}_i$ 是 128 维而 $W^O$ 要求 12288 维输入。拆出 (8.14′) 拼接步、并用 $o_i$ 与 $\text{head}_i^{(c)}$ 两个符号，缺口即补上。</p></blockquote>
 
@@ -288,7 +291,9 @@
 <p>$$k_3 = [0.2,\ 0.5,\ 0.4,\ \ldots] \quad v_3 = [0.6,\ 0.2,\ -0.3,\ \ldots] \quad \text{（"睡"自己）}$$</p>
 
 <p><strong>Step 2：计算得分（除以 $\sqrt{128} \approx 11.3$ 防止梯度消失）</strong></p>
-<p>$$\text{score}(x_3, x_1) = \frac{0.33}{11.3} \approx 0.029 \quad \text{score}(x_3, x_2) = \frac{0.52}{11.3} \approx 0.046 \quad \text{score}(x_3, x_3) = \frac{0.71}{11.3} \approx 0.063$$</p>
+<p>$$\text{score}(x_3, x_1) = \frac{0.33}{11.3} \approx 0.029$$</p>
+<p>$$\text{score}(x_3, x_2) = \frac{0.52}{11.3} \approx 0.046$$</p>
+<p>$$\text{score}(x_3, x_3) = \frac{0.71}{11.3} \approx 0.063$$</p>
 
 <p><strong>Step 3：Softmax 归一化</strong></p>
 <p>$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.319,\ 0.328,\ 0.353]$$</p>
