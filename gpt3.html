@@ -189,68 +189,23 @@
 <h2>一、GPT-3 基本参数（来自 GPT3.md）</h2>
 <table>
 <thead>
-<tr>
-<th>参数</th>
-<th>数值</th>
-</tr>
+<tr><th>参数</th><th>数值</th></tr>
 </thead>
 <tbody>
-<tr>
-<td>模型名称</td>
-<td>GPT-3</td>
-</tr>
-<tr>
-<td>发布机构</td>
-<td>OpenAI</td>
-</tr>
-<tr>
-<td>发布日期</td>
-<td>2020-06-11</td>
-</tr>
-<tr>
-<td>训练 token 数</td>
-<td>3000 亿（$3 \times 10^{11}$）</td>
-</tr>
-<tr>
-<td>词表大小 $\|V\|$</td>
-<td>50,527</td>
-</tr>
-<tr>
-<td>总参数量</td>
-<td>1750 亿（$1.75 \times 10^{11}$）</td>
-</tr>
-<tr>
-<td>层数</td>
-<td>96</td>
-</tr>
-<tr>
-<td>模型维度 $d_{model}$</td>
-<td>12,288</td>
-</tr>
-<tr>
-<td>注意力头数</td>
-<td>96</td>
-</tr>
-<tr>
-<td>每头维度</td>
-<td>128（= 12288 ÷ 96）</td>
-</tr>
-<tr>
-<td>FFN 中间维度</td>
-<td>49,152（= 12288 × 4）</td>
-</tr>
-<tr>
-<td>Batch size</td>
-<td>3,200,000 tokens</td>
-</tr>
-<tr>
-<td>学习率</td>
-<td>6e-05</td>
-</tr>
-<tr>
-<td>训练硬件</td>
-<td>V100 GPU</td>
-</tr>
+<tr><td>模型名称</td><td>GPT-3</td></tr>
+<tr><td>发布机构</td><td>OpenAI</td></tr>
+<tr><td>发布日期</td><td>2020-06-11</td></tr>
+<tr><td>训练 token 数</td><td>3000 亿（$3 \times 10^{11}$）</td></tr>
+<tr><td>词表大小 $|V|$</td><td>50,527</td></tr>
+<tr><td>总参数量</td><td>1750 亿（$1.75 \times 10^{11}$）</td></tr>
+<tr><td>层数</td><td>96</td></tr>
+<tr><td>模型维度 $d_{model}$</td><td>12,288</td></tr>
+<tr><td>注意力头数</td><td>96</td></tr>
+<tr><td>每头维度</td><td>128（= 12288 ÷ 96）</td></tr>
+<tr><td>FFN 中间维度</td><td>49,152（= 12288 × 4）</td></tr>
+<tr><td>Batch size</td><td>3,200,000 tokens</td></tr>
+<tr><td>学习率</td><td>6e-05</td></tr>
+<tr><td>训练硬件</td><td>V100 GPU</td></tr>
 </tbody>
 </table>
 <hr />
@@ -285,23 +240,70 @@
 <h3>第二步：一层 Transformer Block 的完整计算</h3>
 <h4>Layer Norm</h4>
 <p>形状不变：$[1,\ 12288] \rightarrow [1,\ 12288]$</p>
+<p>这里的 Layer Norm 不是矩阵乘法，而是对当前 token 的 12288 维隐藏向量做归一化。</p>
+<p>假设当前 token 的向量是：</p>
+<p>$$x = [x_1, x_2, \dots, x_{12288}]$$</p>
+<p>先计算这 12288 个数的平均值：</p>
+<p>$$\mu = \frac{1}{d}\sum_{i=1}^{d} x_i$$</p>
+<p>再计算方差：</p>
+<p>$$\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2$$</p>
+<p>然后把每一维标准化：</p>
+<p>$$\hat{x}_i = \frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}$$</p>
+<p>最后再乘上可训练的缩放参数 $\gamma_i$，加上可训练的平移参数 $\beta_i$：</p>
+<p>$$y_i = \gamma_i \hat{x}_i + \beta_i$$</p>
+<p>其中 $d=12288$，$\epsilon$ 是一个很小的数，用来防止除以 0。$\gamma$ 和 $\beta$ 的形状都是 $[12288]$。</p>
+<p>直观理解：Layer Norm 会把一个 token 的 12288 个特征值拉到更稳定的数值范围，让它们大致均值为 0、方差为 1，然后再交给 Attention 或 FFN 继续计算。</p>
 <h4>Multi-Head Attention：4 次大矩阵乘法</h4>
 <p><strong>生成 Q、K、V（各一次）：</strong></p>
 <p>$$Q = x \cdot W_Q \quad [1,\ 12288] \times [12288,\ 12288] \rightarrow [1,\ 12288]$$</p>
 <p>$W_Q,\ W_K,\ W_V$ 各有参数量：$12288^2 = \textbf{1.51 亿}$</p>
 <p><strong>切分为 96 个头，每头 128 维：</strong></p>
 <p>$$[1,\ 12288] \rightarrow \text{96 个头，每头} [1,\ 128]$$</p>
+<p><strong>小知识点：为什么是 96 个头？</strong></p>
+<p>GPT-3 175B 的隐藏维度是 $d_{\text{model}}=12288$，注意力头数是 $n_{\text{heads}}=96$，所以每个头的维度是：</p>
+<p>$$d_{\text{head}}=\frac{d_{\text{model}}}{n_{\text{heads}}}=\frac{12288}{96}=128$$</p>
+<p>这里的 96 不是严格数学推导出来的最优值，更像是经验、实验和硬件效率共同作用后的设计选择。实际设计大模型时，常见做法是让每个 head 保持一个比较合适的维度，例如 64 或 128，然后根据总隐藏维度反推头数。</p>
+<p>如果只分成 1 个头：</p>
+<p>$$n_{\text{heads}}=1,\quad d_{\text{head}}=12288$$</p>
+<p>模型就只有一套注意力分布。它仍然可以计算 $QK^T$，但所有关系都要挤进同一个 attention map 里，表达模式会比较单一。</p>
+<p>如果分成 12288 个头：</p>
+<p>$$n_{\text{heads}}=12288,\quad d_{\text{head}}=1$$</p>
+<p>每个头只有 1 维，单个头的 query/key 只是一个数字，能表达的相似度太弱。同时会产生大量很小的 softmax 和调度开销，工程效率也会很差。</p>
+<p>所以头数的选择一般是在两边之间找平衡：</p>
+<ul>
+<li>头太少：注意力模式太单一。</li>
+<li>头太多：每个头维度太小，表达力下降，kernel 调度和 softmax 开销变大。</li>
+<li>常见分析方法：固定模型规模做 ablation，对比不同头数的训练 loss、下游任务效果、显存占用、KV cache 成本和 GPU kernel 效率。</li>
+</ul>
+<p>一句话：GPT-3 的 96 个头不是公式证明出的最优解，而是在 $12288$ hidden size 下选择 $128$ head dimension 后得到的工程经验平衡点。</p>
 <p><strong>每头计算注意力得分：</strong></p>
-<p>$$\text{score} = Q_{head} \cdot K_{head}^T = [1,128] \cdot [128,1] = \text{一个标量}$$</p>
+<p>$$\text{score} = Q_{head}K_{head}^T = [1,128] \times [128,1] = \text{一个标量}$$</p>
 <p>Softmax 后加权求和，每头输出 $[1,\ 128]$，96 头拼接回 $[1,\ 12288]$。</p>
 <blockquote>
 <p><strong>以下展开多头注意力的完整计算细节。</strong></p>
 </blockquote>
 <hr />
 <h4>多头注意力完整计算（以"黑猫睡"为例，计算"睡"的输出）</h4>
+<p><strong>小注解：$q_3$ 里的 3 是什么？</strong></p>
+<p>在例子"黑猫睡"里：</p>
+<p>$$x_1=\text{黑},\quad x_2=\text{猫},\quad x_3=\text{睡}$$</p>
+<p>所以 $q_3$ 表示第 3 个 token，也就是"睡"这个位置生成的 query 向量。这里的下标 3 是位置序号，不是第 3 维，也不是第 3 个 attention head。</p>
+<p>同理，$k_1,v_1$ 来自"黑"，$k_2,v_2$ 来自"猫"，$k_3,v_3$ 来自"睡"。计算"睡"的注意力输出时，会用 $q_3$ 分别和 $k_1,k_2,k_3$ 做相似度计算：</p>
+<p>$$q_3k_1^T,\quad q_3k_2^T,\quad q_3k_3^T$$</p>
+<p>这表示"睡"这个 token 分别看"黑""猫"和它自己。因为 GPT 是因果模型，所以第 3 个 token 只能看位置 1、2、3，不能看未来的位置 4、5、...。</p>
 <p><strong>教科书公式 8.10～8.14：</strong></p>
 <p>$$q_i = x_i W^Q \quad k_j = x_j W^K \quad v_j = x_j W^V \tag{8.10}$$</p>
-<p>$$\text{score}(x_i, x_j) = \frac{q_i \cdot k_j}{\sqrt{d_k}} \tag{8.11}$$</p>
+<p>$$\text{score}(x_i, x_j) = \frac{q_i k_j^T}{\sqrt{d_k}} \tag{8.11}$$</p>
+<p><strong>小知识点：为什么原书写 $q_i \cdot k_j$，工程里常写 $q_i k_j^T$？</strong></p>
+<p>原书里的 $q_i \cdot k_j$ 是向量点积写法，数学上没有问题。点积符号 $\cdot$ 本身就表示两个向量逐维相乘后求和：</p>
+<p>$$q_i \cdot k_j = \sum_{m=1}^{d_k} q_{i,m} k_{j,m}$$</p>
+<p>如果从矩阵形状看，把 $q_i$ 和 $k_j$ 都看成行向量：</p>
+<p>$$q_i:[1,d_k] \quad k_j:[1,d_k]$$</p>
+<p>那么要得到一个注意力分数标量，就需要把 $k_j$ 转置：</p>
+<p>$$q_i k_j^T:[1,d_k]\times[d_k,1]\rightarrow[1,1]$$</p>
+<p>所以：</p>
+<p>$$q_i \cdot k_j \equiv q_i k_j^T$$</p>
+<p>区别只是视角不同：$q_i \cdot k_j$ 是数学向量内积写法，$q_i k_j^T$ 是矩阵乘法/工程实现写法，更容易和代码里的 $QK^T$ 对上。真正不严谨的是写成没有点积符号、也没有转置的 $q_i k_j$。</p>
 <p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \quad \forall j \leq i \tag{8.12}$$</p>
 <p>$$\text{head}_i = \sum_{j \leq i} \alpha_{ij} v_j \tag{8.13}$$</p>
 <p>$$a_i = \text{head}_i W^O \tag{8.14}$$</p>
@@ -320,28 +322,12 @@
 <p>$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.319,\ 0.328,\ 0.353]$$</p>
 <table>
 <thead>
-<tr>
-<th>词</th>
-<th>注意力权重</th>
-<th>解读</th>
-</tr>
+<tr><th>词</th><th>注意力权重</th><th>解读</th></tr>
 </thead>
 <tbody>
-<tr>
-<td>"黑"</td>
-<td>31.9%</td>
-<td>"睡"对"黑"的关注程度</td>
-</tr>
-<tr>
-<td>"猫"</td>
-<td>32.8%</td>
-<td>"睡"对"猫"的关注程度</td>
-</tr>
-<tr>
-<td>"睡"自己</td>
-<td>35.3%</td>
-<td>"睡"对自身的关注程度</td>
-</tr>
+<tr><td>"黑"</td><td>31.9%</td><td>"睡"对"黑"的关注程度</td></tr>
+<tr><td>"猫"</td><td>32.8%</td><td>"睡"对"猫"的关注程度</td></tr>
+<tr><td>"睡"自己</td><td>35.3%</td><td>"睡"对自身的关注程度</td></tr>
 </tbody>
 </table>
 <p><strong>Step 4：加权求和，得到单头输出（公式 8.13）</strong></p>
@@ -357,7 +343,7 @@
 </code></pre>
 <p>$$96 \times 128 = 12288 \quad \Rightarrow \quad \text{concat} = [0.341,\ 0.301,\ \ldots,\ 0.223,\ 0.671,\ \ldots] \quad \text{（12288个数）}$$</p>
 <p><strong>多头注意力完整流程图：</strong></p>
-<pre><code>x₃（&quot;睡&quot;）[1, 12288]
+<pre><code>x₃（"睡"）[1, 12288]
        │
    ┌───┴──────────── 96个头并行 ──────────────┐
    │                                           │
@@ -398,40 +384,16 @@
 <h4>一层 Block 参数量汇总</h4>
 <table>
 <thead>
-<tr>
-<th>组件</th>
-<th>参数量</th>
-</tr>
+<tr><th>组件</th><th>参数量</th></tr>
 </thead>
 <tbody>
-<tr>
-<td>$W_Q$</td>
-<td>1.51 亿</td>
-</tr>
-<tr>
-<td>$W_K$</td>
-<td>1.51 亿</td>
-</tr>
-<tr>
-<td>$W_V$</td>
-<td>1.51 亿</td>
-</tr>
-<tr>
-<td>$W_O$</td>
-<td>1.51 亿</td>
-</tr>
-<tr>
-<td>$W_1$（FFN 升维）</td>
-<td>6.04 亿</td>
-</tr>
-<tr>
-<td>$W_2$（FFN 降维）</td>
-<td>6.04 亿</td>
-</tr>
-<tr>
-<td><strong>一层合计</strong></td>
-<td><strong>18.1 亿</strong></td>
-</tr>
+<tr><td>$W_Q$</td><td>1.51 亿</td></tr>
+<tr><td>$W_K$</td><td>1.51 亿</td></tr>
+<tr><td>$W_V$</td><td>1.51 亿</td></tr>
+<tr><td>$W_O$</td><td>1.51 亿</td></tr>
+<tr><td>$W_1$（FFN 升维）</td><td>6.04 亿</td></tr>
+<tr><td>$W_2$（FFN 降维）</td><td>6.04 亿</td></tr>
+<tr><td><strong>一层合计</strong></td><td><strong>18.1 亿</strong></td></tr>
 </tbody>
 </table>
 <hr />
@@ -473,24 +435,12 @@ logits: [1, 50527]
 <p>训练时 320 万个 token 同时处理，每次大矩阵乘法的实际形状：</p>
 <table>
 <thead>
-<tr>
-<th>矩阵乘法</th>
-<th>形状</th>
-</tr>
+<tr><th>矩阵乘法</th><th>形状</th></tr>
 </thead>
 <tbody>
-<tr>
-<td>$X \cdot W_Q$</td>
-<td>$[3200000,\ 12288] \times [12288,\ 12288]$</td>
-</tr>
-<tr>
-<td>$X \cdot W_1$</td>
-<td>$[3200000,\ 12288] \times [12288,\ 49152]$</td>
-</tr>
-<tr>
-<td>$X \cdot W_2$</td>
-<td>$[3200000,\ 49152] \times [49152,\ 12288]$</td>
-</tr>
+<tr><td>$X \cdot W_Q$</td><td>$[3200000,\ 12288] \times [12288,\ 12288]$</td></tr>
+<tr><td>$X \cdot W_1$</td><td>$[3200000,\ 12288] \times [12288,\ 49152]$</td></tr>
+<tr><td>$X \cdot W_2$</td><td>$[3200000,\ 49152] \times [49152,\ 12288]$</td></tr>
 </tbody>
 </table>
 <p><strong>一次 $W_Q$ 乘法的 FLOPs：</strong></p>
@@ -523,55 +473,25 @@ logits: [1, 50527]
 <h3>理论值 vs 实测值</h3>
 <table>
 <thead>
-<tr>
-<th></th>
-<th>数值</th>
-</tr>
+<tr><th></th><th>数值</th></tr>
 </thead>
 <tbody>
-<tr>
-<td>理论下限（纯计算）</td>
-<td>93 MWh</td>
-</tr>
-<tr>
-<td>实测消耗</td>
-<td><strong>1,287 MWh</strong></td>
-</tr>
-<tr>
-<td>差距倍数</td>
-<td>约 14 倍</td>
-</tr>
+<tr><td>理论下限（纯计算）</td><td>93 MWh</td></tr>
+<tr><td>实测消耗</td><td><strong>1,287 MWh</strong></td></tr>
+<tr><td>差距倍数</td><td>约 14 倍</td></tr>
 </tbody>
 </table>
 <p>差距来源：</p>
 <table>
 <thead>
-<tr>
-<th>额外开销</th>
-<th>说明</th>
-</tr>
+<tr><th>额外开销</th><th>说明</th></tr>
 </thead>
 <tbody>
-<tr>
-<td>PUE（数据中心能效系数）</td>
-<td>散热、照明、网络等，通常使总用电乘以 1.2～1.5 倍</td>
-</tr>
-<tr>
-<td>GPU 利用率不足</td>
-<td>等待通信和 IO 的时间也在耗电</td>
-</tr>
-<tr>
-<td>梯度检查点、重算</td>
-<td>为节省显存，部分激活值需重新计算</td>
-</tr>
-<tr>
-<td>网络通信开销</td>
-<td>数千张 GPU 之间同步梯度</td>
-</tr>
-<tr>
-<td>训练不稳定、重启</td>
-<td>训练中途崩溃重启浪费电力</td>
-</tr>
+<tr><td>PUE（数据中心能效系数）</td><td>散热、照明、网络等，通常使总用电乘以 1.2～1.5 倍</td></tr>
+<tr><td>GPU 利用率不足</td><td>等待通信和 IO 的时间也在耗电</td></tr>
+<tr><td>梯度检查点、重算</td><td>为节省显存，部分激活值需重新计算</td></tr>
+<tr><td>网络通信开销</td><td>数千张 GPU 之间同步梯度</td></tr>
+<tr><td>训练不稳定、重启</td><td>训练中途崩溃重启浪费电力</td></tr>
 </tbody>
 </table>
 <h3>实测数据</h3>
