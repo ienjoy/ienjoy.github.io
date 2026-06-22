@@ -189,7 +189,8 @@
 <p>如果把 $q_i$ 和 $k_j$ 都看成行向量（形状 $[1,d_k]$），要得到一个标量就需要转置：</p>
 <p>$$q_i k_j^T:[1,d_k]\times[d_k,1]\rightarrow[1,1]$$</p>
 <p>所以 $q_i \cdot k_j \equiv q_i k_j^T$，区别只是视角不同——前者是数学内积写法，后者是工程矩阵乘法写法，更容易和代码里的 $QK^T$ 对上。</p>
-<p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \quad \forall j \leq i \tag{8.12}$$</p>
+<p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \tag{8.12}$$</p>
+<p>其中 $j \leq i$（因果掩码：只对当前及之前的位置计算注意力权重，$j > i$ 时 $\alpha_{ij} = 0$）。</p>
 <p>$$\text{head}_i = \sum_{j \leq i} \alpha_{ij} v_j \tag{8.13}$$</p>
 <p>$$a_i = \text{head}_i W^O \tag{8.14}$$</p>
 
