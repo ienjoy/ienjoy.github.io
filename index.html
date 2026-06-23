@@ -110,6 +110,11 @@
   .llama:hover,
   .llama:focus-visible { border-color: var(--accent2); }
 
+  .guide .tag { color: #f472b6; }
+  .guide .open { color: #f472b6; }
+  .guide:hover,
+  .guide:focus-visible { border-color: #f472b6; }
+
   footer {
     margin-top: 2.5rem;
     color: var(--muted);
@@ -143,6 +148,13 @@
       <h2>现代 LLM 架构、计算规模与能耗</h2>
       <p>围绕 GQA、RoPE、SwiGLU、KV Cache 与 FlashAttention 拆解现代模型。</p>
       <span class="open">阅读文章 →</span>
+    </a>
+
+    <a class="card guide" href="llama3-8b-guide.html" style="grid-column: 1 / -1;">
+      <span class="tag">LLaMA-3 8B · 完整指南</span>
+      <h2>LLaMA-3 8B 计算规模、信息流与能耗（完整指南）</h2>
+      <p>学习者向深度指南：从 GPT-3 → LLaMA-3 逐步拆解四项关键改进（Pre-RMSNorm / GQA / RoPE / SwiGLU），附完整前向传播数值推导、KV Cache 计算、Prefill vs Decode FLOPs 与训练能耗换算。</p>
+      <span class="open">阅读完整指南 →</span>
     </a>
   </section>
 
