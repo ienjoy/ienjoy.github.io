@@ -136,6 +136,31 @@
   strong { color: #fff; }
   em { color: var(--muted); font-style: italic; }
   .katex-display { overflow-x: auto; padding: 0.4rem 0; }
+  .diagram-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f5f3ef;
+    border: 1px solid #ddd6cc;
+    border-radius: 10px;
+    padding: 1.4rem 1rem 1rem;
+    margin: 1.4rem 0 1.8rem;
+  }
+  .diagram-wrap img {
+    max-width: 320px;
+    width: 100%;
+    display: block;
+  }
+  .diagram-caption {
+    margin-top: 0.75rem;
+    font-size: 0.82rem;
+    color: #666;
+    text-align: center;
+    font-style: italic;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 420px;
+    line-height: 1.5;
+  }
   .subtitle {
     color: var(--muted);
     font-size: 0.95rem;
@@ -267,6 +292,16 @@
 <hr />
 
 <h2 id="sec3">三、完整前向传播：用具体数值走一遍</h2>
+
+<div class="diagram-wrap">
+  <img src="llm%20diagram.png" alt="LLM Transformer 架构总览" />
+  <div class="diagram-caption">
+    Transformer 解码器架构总览：Input → Tokenization → Embedding →
+    [LayerNorm + Attention heads + 残差 + LayerNorm + MLP + 残差] × L →
+    LayerNorm → Unembed → Logits → Softmax → 下一个 token 概率分布
+  </div>
+</div>
+
 <blockquote><p>先追踪 <strong>1 个 token</strong>，感受张量形状；最后乘以批量感受总规模。</p></blockquote>
 
 <h3>第一步：Embedding 查表</h3>
