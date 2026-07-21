@@ -69,6 +69,12 @@
     color: var(--accent2);
     margin: 1.8rem 0 0.6rem;
   }
+  h5 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--green);
+    margin: 1.2rem 0 0.35rem;
+  }
   h4 {
     font-size: 1rem;
     font-weight: 600;
@@ -231,7 +237,7 @@
 <nav aria-label="站点导航"><a class="back-link" href="index.html">← 返回文章首页</a></nav>
 
 <h1>LLaMA-3 8B 计算规模、信息流与能耗</h1>
-<p class="subtitle">整合自对话记录与 LLaMA-3 8B 架构图（<code>Llm arch 1080P.html</code>），涵盖 LLaMA-3 8B 架构参数、现代设计改动的来龙去脉（GQA / RoPE / SwiGLU / KV Cache）、完整前向传播数值演示，以及 FLOPs 与训练能耗的关系。</p>
+<p class="subtitle">整合自对话记录与 LLaMA-3 8B 架构图（<code>Llm arch 1080P.html</code>），涵盖 LLaMA-3 8B 架构参数、现代设计改动的来龙去脉（GQA / RoPE / SwiGLU / KV Cache）、完整前向传播数值演示、反向传播与训练机理，以及 FLOPs、训练显存和能耗的关系。</p>
 
 <div class="toc">
   <div class="toc-title">目录</div>
@@ -243,7 +249,8 @@
   <a href="#sec6">六、KV Cache：为什么 GQA 对推理至关重要</a>
   <a href="#sec7">七、FLOPs 计算：Prefill 与 Decode 分开看</a>
   <a href="#sec8">八、训练 FLOPs 与能耗换算</a>
-  <a href="#sec9">九、总结</a>
+  <a href="#sec9">九、反向传播与训练机理</a>
+  <a href="#sec10">十、总结</a>
 </div>
 
 <hr />
@@ -858,7 +865,436 @@ $$\text{MFU} = \frac{154}{989} \approx \textbf{15.6\%}$$
 
 <hr />
 
-<h2 id="sec9">九、总结</h2>
+<h2 id="sec9">九、反向传播与训练机理</h2>
+<p>本章沿着前向传播的同一条链路倒着计算梯度，说明训练代码中 <code>loss.backward()</code> 实际完成了什么。数值例子复用配套文档《LLaMA-3-8B现代LLM架构计算规模与能耗》中的 toy GQA 模型（8 个 Query head、2 个 KV head、<code>head_dim=2</code>、<code>d_model=16</code>，token 为“机器／学习／很／有趣”），便于在同一组 Q／K／V／softmax 数值上验证反向结果。</p>
+<h3>9.0 两条贯穿全文的规则</h3>
+<p>反向传播看起来步骤很多，但本质只是链式法则加一条容易被忽略的补充规则：</p>
+<ol>
+<li><strong>链式法则</strong>：$y=f(x)$，已知 $\dfrac{\partial L}{\partial y}$，则 $\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y}\cdot\dfrac{\partial y}{\partial x}$。</li>
+<li><strong>分支相加</strong>：如果 $x$ 在前向传播中被<strong>多个地方使用</strong>（比如同一个 $x$ 既算 $y_1=f_1(x)$ 又算 $y_2=f_2(x)$），那么反向传播时 $x$ 收到的梯度是<strong>所有分支梯度之和</strong>：
+$$\frac{\partial L}{\partial x} = \frac{\partial L}{\partial y_1}\frac{\partial y_1}{\partial x} + \frac{\partial L}{\partial y_2}\frac{\partial y_2}{\partial x}$$</li>
+</ol>
+<p>规则 2 看起来简单，但它正是 <strong>GQA 反向传播的核心</strong>——前向时 1 个 KV head 的数据被&quot;广播&quot;给 4 个 Query head 使用，反向时这 4 个 Query head 传回来的梯度必须在 KV head 处<strong>加起来</strong>。以及 <strong>SwiGLU 反向</strong>（$H$ 同时喂给 gate 和 up 两条支路）、<strong>残差连接反向</strong>（$x$ 同时走了 $F(x)$ 支路和跳过 $F$ 的直连支路）——三处关键设计都是这条规则的具体应用。</p>
+<hr />
+<h3>9.1 一次训练 step 的完整链路</h3>
+<pre><code>X (输入 token ids)
+   │
+   ▼ forward（前向文档已讲）
+logits [1, seq_len, 128256]
+   │
+   ▼ Loss（交叉熵，与 target token 比较）
+L（标量）
+   │
+   ▼ backward（本文要讲的部分，反向走一遍前向的每一步）
+dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_gate, dL/dW_up, dL/dW_down, dL/dE, ...
+   │
+   ▼ optimizer.step()（如 Adam，用梯度更新每个权重）
+W ← W - lr × (梯度的某种处理结果)
+   │
+   ▼ zero_grad()
+清空梯度，进入下一个 batch
+</code></pre>
+<p>反向传播的形状和前向是<strong>镜像</strong>的：前向从 <code>[1,4096]</code> 一路变成 <code>[1,128256]</code>，反向就是从 <code>[1,128256]</code> 的梯度一路变回 <code>[1,4096]</code>，每一步的张量形状和前向完全对应，只是数据流方向相反。</p>
+<p><strong>需要注意</strong>：上面图里&quot;X (输入 token ids)&quot;只是前向的起点标签，token id 是离散整数，没有梯度可言（$\partial L/\partial\text{token\_id}$ 没有意义）。反向传播链路真正的终点是 Embedding 查表之后那个连续向量 $x_0=E[\text{token\_id},:]$ 的梯度 <code>[1,4096]</code>，最终再落到 Embedding 权重矩阵 $E$ 本身（第六节）——链路在&quot;查表&quot;这个操作处就结束了，不会、也不需要传到离散的输入 id 上。</p>
+<hr />
+<h3>9.2 起点：Loss 对 logits 的梯度</h3>
+<p>LLaMA-3 训练用交叉熵损失。设 target token 的 one-hot 向量是 $y$（只有正确 token 位置是 1，其余是 0），预测概率 $p=\text{softmax}(\text{logits})$：</p>
+<p>$$L = -\log p_{\text{target}} = -\sum_i y_i \log p_i$$</p>
+<p><strong>关键结果</strong>（softmax 和交叉熵放在一起求导会大幅简化）：</p>
+<p>$$\frac{\partial L}{\partial \text{logits}_i} = p_i - y_i$$</p>
+<p>也就是&quot;模型预测的概率分布&quot;减去&quot;真实分布（one-hot）&quot;。这是整条反向传播链路的<strong>起点信号</strong>，形状为 $[1,\ 128256]$。</p>
+<p><strong>小例子</strong>（词表只有 4 个词，方便手算）：假设 logits = $[2.0, 1.0, 0.1, 0.5]$，target 是第 0 个词。</p>
+<p>$$p = \text{softmax}([2.0,1.0,0.1,0.5]) \approx [0.575,\ 0.211,\ 0.086,\ 0.128]$$</p>
+<p>$$\frac{\partial L}{\partial \text{logits}} = p - [1,0,0,0] \approx [-0.425,\ 0.211,\ 0.086,\ 0.128]$$</p>
+<p><strong>校验</strong>：$p$ 四项之和应为 1（$0.575+0.211+0.086+0.128\approx1$ ✓），梯度四项之和应为 0（$-0.425+0.211+0.086+0.128\approx0$ ✓）——这两条是手算或写代码时最快发现算错的自检方式。</p>
+<p>直觉：正确 token 的梯度是负的（说明要&quot;调高&quot;它的 logit 才能降低 loss），其余 token 的梯度是正的（要&quot;调低&quot;）。</p>
+<p><strong>批次、序列维度与&quot;平均&quot;</strong>：上面为了手算方便只看了 1 个 token，也没有除以 token 数。真实训练里 logits 形状是 $[B,\ S,\ V]$（$B$=batch size，$S$=序列长度），loss 通常是对所有<strong>有效</strong> token（不含 padding）求平均。设有效 token 数为 $M$，则每个位置的梯度要多除一个 $M$：</p>
+<p>$$\frac{\partial L}{\partial \text{logits}_{b,t,i}} = \frac{p_{b,t,i}-y_{b,t,i}}{M}$$</p>
+<blockquote>
+<p><strong>记号约定</strong>：从这里开始，为了对照前向文档的具体数值，公式都按&quot;单个 token&quot;（一行向量）推导，形状写成 $[1,4096]$ 之类。真实实现里 $X,H,Q,K,V,\dots$ 都还有 batch 和序列维度（如 $X:[B,S,4096]$）。对<strong>权重</strong>的梯度（如下面的 $\partial L/\partial U$、$\partial L/\partial w_i$、$\partial L/\partial W_Q$ 等）都需要在 $B,S$ 两个维度上求和——因为同一份权重被 batch 里所有 token 位置共同使用，这正是第〇节&quot;分支相加&quot;规则的又一次应用，只是这次分支多达 $B\times S$ 条。激活/输入的梯度不需要像共享权重那样统一压缩掉 batch/序列维度，但一个激活节点仍然要把计算图里<strong>所有用到它的分支</strong>的梯度累加起来。这里有两件不同的事需要分清楚：线性层、RMSNorm、SwiGLU 这类操作<strong>不产生跨 token 依赖</strong>——每个 token 位置的计算互不影响，可以&quot;各自独立地往前传&quot;；但同一个 token <strong>内部</strong>仍然可能有多条分支需要相加（比如 SwiGLU 的 gate/up 两条支路，见 5.2，这和&quot;跨 token&quot;无关，是同一个 token 内的分支相加）。在本文列出的这几个模块里，<strong>只有 Attention 直接混合不同 token 位置</strong>：一个位置 $j$ 的 $K_j,V_j$ 会被多个后续 query token 共同使用，梯度要跨 query 位置累加（第五节 5.4 会具体展开）。（这里限定在本文描述的标准 decoder-only 主干内——序列级损失、跨 token 正则项、MoE 路由辅助损失这类额外设计也可能引入跨 token 依赖，但不在本文讨论范围内，LLaMA-3 8B 这条标准反向链路不受影响。）</p>
+</blockquote>
+<hr />
+<h3>9.3 LM Head 反向</h3>
+<p>前向：$\text{logits} = h_\text{final} \cdot U,\quad U:[4096,\ 128256]$</p>
+<p>线性层反向的通用公式（记住这两条，后面所有 $W_Q,W_K,W_V,W_O,W_\text{gate},W_\text{up},W_\text{down}$ 的反向都是同一套）：</p>
+<p>$$Y = XW \implies \frac{\partial L}{\partial X} = \frac{\partial L}{\partial Y}\,W^\top, \qquad \frac{\partial L}{\partial W} = X^\top \frac{\partial L}{\partial Y}$$</p>
+<p>代入 LM Head：</p>
+<p>$$\frac{\partial L}{\partial h_\text{final}} = \frac{\partial L}{\partial \text{logits}} \cdot U^\top \quad [1,\ 128256]\times[128256,\ 4096] \rightarrow [1,\ 4096]$$</p>
+<p>$$\frac{\partial L}{\partial U} = h_\text{final}^\top \cdot \frac{\partial L}{\partial \text{logits}} \quad [4096,\ 1]\times[1,\ 128256] \rightarrow [4096,\ 128256]$$</p>
+<p>两个结果形状分别对应 $h_\text{final}$（继续往前传）和 $U$（这一层要更新的权重）——这个&quot;一个输出、两个梯度&quot;的模式会在每一个矩阵乘法处重复出现。</p>
+<p>上面 $\partial L/\partial U$ 是<strong>单个 token</strong> 的贡献；$U$ 是整个 batch、整个序列所有 token 共享的同一份权重，按前面的记号约定，真正要用来更新权重的梯度是对所有 $b,t$ 求和：</p>
+<p>$$\frac{\partial L}{\partial U} = \sum_{b,t} h_{b,t}^\top \frac{\partial L}{\partial \text{logits}_{b,t}}$$</p>
+<p>而 $\partial L/\partial h_{b,t}$ 对每个 token 位置各自独立，不需要求和，直接继续往前传即可。</p>
+<hr />
+<h3>9.4 Final RMSNorm 反向</h3>
+<p>前向（复习）：</p>
+<p>$$r = \text{RMS}(x)=\sqrt{\tfrac{1}{d}\sum_i x_i^2+\epsilon},\qquad n_i=\frac{x_i}{r},\qquad y_i = n_i\, w_i$$</p>
+<p><strong>对权重 $w$ 的梯度</strong>（单个 token，逐元素）：</p>
+<p>$$\frac{\partial L}{\partial w_i} = \frac{\partial L}{\partial y_i}\cdot n_i$$</p>
+<p>同样地，$w$ 是所有 batch、所有序列位置共享的同一份权重，真正的梯度要对 $b,t$ 求和：</p>
+<p>$$\frac{\partial L}{\partial w_i} = \sum_{b,t}\frac{\partial L}{\partial y_{b,t,i}}\cdot n_{b,t,i}$$</p>
+<p><strong>对输入 $x$ 的梯度</strong>（麻烦一点，因为 $r$ 依赖所有 $x_i$，不能逐元素独立求导）。记 $g_i = \dfrac{\partial L}{\partial y_i}\cdot w_i$（先把权重缩放吸收掉），结果是：</p>
+<p>$$\frac{\partial L}{\partial x_j} = \frac{1}{r}\left[g_j - \frac{n_j}{d}\sum_i g_i n_i\right]$$</p>
+<p><strong>直觉</strong>：第一项 $g_j/r$ 是&quot;当作没有归一化时&quot;的梯度；第二项是修正项——因为 $x_j$ 变化不仅影响自己的 $n_j$，还会通过分母 $r$ 影响<strong>所有</strong>其他 $n_i$，修正项就是把这个&quot;全局耦合&quot;效应减掉。这个形式和 LayerNorm 反向几乎一样，只是 LayerNorm 还要多处理一个&quot;减均值&quot;带来的耦合项。</p>
+<blockquote>
+<p>这个公式在整个模型里一共要用 $32\times2+1=65$ 次——每个 Block 有 2 个 RMSNorm（Attention 前 1 个、FFN 前 1 个），32 层就是 64 次，再加 1 次 Final RMSNorm，是反向传播里出现频率最高的公式之一。</p>
+</blockquote>
+<hr />
+<h3>9.5 32 层 Block 反向：从最后一层往前，重复 32 次</h3>
+<p>训练时反向传播是<strong>从第 32 层往第 1 层走</strong>，每层内部也是把前向的步骤倒过来。下面按前向的相反顺序展开一层。</p>
+<h4>9.5.1 残差连接反向——&quot;梯度高速公路&quot;到底是什么</h4>
+<p>前向：$X_\text{next} = H + Y$（$H$ 是残差分支，$Y$ 是 FFN 或 attention 的输出）</p>
+<p>反向（加法节点的梯度直接复制给两个分支，不衰减）：</p>
+<p>$$\frac{\partial L}{\partial H} \mathrel{+}= \frac{\partial L}{\partial X_\text{next}}, \qquad \frac{\partial L}{\partial Y} = \frac{\partial L}{\partial X_\text{next}}$$</p>
+<p>这就是前向文档里&quot;Pre-Norm 让梯度有一条高速公路&quot;这句话的数学含义：$\dfrac{\partial L}{\partial X_\text{next}}$ 会<strong>原封不动</strong>（传递系数恒为 1）地加到 $\dfrac{\partial L}{\partial H}$ 上，不需要经过 $F(\cdot)$（attention 或 FFN）内部那些可能缩放、旋转甚至反号的变换。32 层累加下来，残差保证了&quot;存在一条从第 32 层直接连到第 1 层、传递系数恒为 1 的路径&quot;，这是深层网络不容易梯度消失的关键原因。</p>
+<p><strong>需要注意</strong>：这<strong>不等于</strong>&quot;最终梯度一定不会变小&quot;。直连路径传回来的梯度和经过 $F(\cdot)$ 分支传回来的梯度，在同一个节点上是<strong>相加</strong>的关系——如果两者方向相反，仍然可能相互抵消，导致最终梯度变小甚至接近 0。残差解决的是&quot;是否存在一条不衰减的路径&quot;，而不是保证&quot;最终梯度一定不衰减&quot;。</p>
+<p><strong>把两次残差合并写清楚</strong>：一个 Block 的输入是 $x$，第一次残差输出 $u=x+\text{Attention}(\text{Norm}_1(x))$，第二次残差输出 $y=u+\text{MLP}(\text{Norm}_2(u))$。记 $g_y=\partial L/\partial y$ 是从下一层（或下一个 Block）传回来的梯度，完整的合并公式是：</p>
+<p>$$g_u = \underbrace{g_y}_{\text{直通残差}} + \underbrace{J_{\text{Norm}_2}^\top J_{\text{MLP}}^\top g_y}_{\text{MLP 分支（5.2+5.3 算出来的）}}$$</p>
+<p>$$g_x = \underbrace{g_u}_{\text{直通残差}} + \underbrace{J_{\text{Norm}_1}^\top J_{\text{Attention}}^\top g_u}_{\text{Attention 分支（5.4+5.5 算出来的）}}$$</p>
+<p>下面 5.2～5.3 具体展开 $J_{\text{Norm}_2}^\top J_{\text{MLP}}^\top g_y$ 这一项（SwiGLU 反向 + 第二个 RMSNorm 反向），5.4～5.5 展开 $J_{\text{Norm}_1}^\top J_{\text{Attention}}^\top g_u$ 这一项（Attention 反向 + 第一个 RMSNorm 反向）——两处推导到最后都别忘了按上面的公式<strong>加回</strong>直通残差的那一份，才是 $g_u$、$g_x$ 的完整值。</p>
+<h4>9.5.2 SwiGLU 反向</h4>
+<p>前向（$u$ 是这个 Block 第一次残差的输出，$\hat u=\text{Norm}_2(u)$ 是喂给 SwiGLU 的归一化结果）：</p>
+<p>$$G = \hat u W_\text{gate}, \quad U = \hat u W_\text{up}, \quad M = \text{SiLU}(G)\odot U, \quad Y = M W_\text{down}$$</p>
+<p>倒着算：</p>
+<p><strong>Down 投影</strong>（线性层反向公式）：</p>
+<p>$$\frac{\partial L}{\partial M} = \frac{\partial L}{\partial Y}\, W_\text{down}^\top, \qquad \frac{\partial L}{\partial W_\text{down}} = M^\top \frac{\partial L}{\partial Y}$$</p>
+<p><strong>门控相乘</strong>（逐元素乘积的反向就是&quot;交换两个因子&quot;）：</p>
+<p>$$\frac{\partial L}{\partial \text{SiLU}(G)} = \frac{\partial L}{\partial M}\odot U, \qquad \frac{\partial L}{\partial U} = \frac{\partial L}{\partial M}\odot \text{SiLU}(G)$$</p>
+<p><strong>SiLU 激活反向</strong>，需要 SiLU 的导数。$\text{SiLU}(x)=x\cdot\sigma(x)$（$\sigma$ 是 sigmoid）：</p>
+<p>$$\text{SiLU}'(x) = \sigma(x) + x\,\sigma(x)(1-\sigma(x)) = \sigma(x)\big[1+x(1-\sigma(x))\big]$$</p>
+<p>$$\frac{\partial L}{\partial G} = \frac{\partial L}{\partial \text{SiLU}(G)} \odot \text{SiLU}'(G)$$</p>
+<p><strong>Up / Gate 投影</strong>（线性层反向公式，各自独立）：</p>
+<p>$$\frac{\partial L}{\partial \hat u}\Big|_\text{up 支路} = \frac{\partial L}{\partial U}W_\text{up}^\top, \qquad \frac{\partial L}{\partial W_\text{up}} = \hat u^\top \frac{\partial L}{\partial U}$$</p>
+<p>$$\frac{\partial L}{\partial \hat u}\Big|_\text{gate 支路} = \frac{\partial L}{\partial G}W_\text{gate}^\top, \qquad \frac{\partial L}{\partial W_\text{gate}} = \hat u^\top \frac{\partial L}{\partial G}$$</p>
+<p><strong>关键一步——分支相加</strong>：$\hat u$ 同时走了 gate 和 up 两条支路（这正是第〇节讲的规则 2），所以：</p>
+<p>$$\frac{\partial L}{\partial \hat u} = \frac{\partial L}{\partial \hat u}\Big|_\text{gate 支路} + \frac{\partial L}{\partial \hat u}\Big|_\text{up 支路}$$</p>
+<p>漏加这一项是实现 SwiGLU 反向传播时最容易犯的错误——少加一条支路算出来的就是错误的梯度（方向和数值都不对，不能简单说成&quot;偏小&quot;）。</p>
+<h4>9.5.3 第二个 Pre-RMSNorm 反向</h4>
+<p>直接套用第四节的 RMSNorm 反向公式，输入是 $u$（残差流），输出是 $\hat u$，把上面算出的 $\partial L/\partial \hat u$ 转成 $g_u^{(\text{MLP})}=\partial L/\partial u$——这正是 5.1 汇总公式里 $J_{\text{Norm}_2}^\top J_{\text{MLP}}^\top g_y$ 这一整项。</p>
+<p>按 5.1 的合并公式，把它加回直通残差的 $g_y$，得到这个 Block 第二个残差节点的完整梯度：</p>
+<p>$$g_u = g_y + g_u^{(\text{MLP})}$$</p>
+<p>这个 $g_u$ 就是接下来要交给 Attention 分支（5.4～5.5）的完整梯度。</p>
+<h4>9.5.4 GQA 注意力反向（含 softmax、RoPE、GQA 梯度累加）——核心难点</h4>
+<p>这是整个反向传播里最容易出错、也最值得手推一遍的部分。反向的<strong>计算顺序</strong>是前向的镜像——前向最后做的是 O 投影，所以反向<strong>第一步</strong>要处理的局部梯度也是 O 投影这一层，然后依次是 concat、每个 head 内部的 softmax/QK/V、RoPE，最后才是 Q/K/V 投影。</p>
+<blockquote>
+<p>这里说&quot;顺序相反&quot;指的是计算顺序，不是说反向传播在&quot;求逆&quot;前向操作：对线性层 $Y=XW$，$dX=dY\,W^\top$，$W^\top$ 一般不是 $W^{-1}$；softmax、SwiGLU 也都不是可逆运算，反向只是在每个节点上算局部梯度、按链式法则往前传。RoPE 是例外——它的旋转矩阵是正交矩阵，转置恰好等于逆，所以下面 (f) 里&quot;把梯度反向旋转回去&quot;确实等价于&quot;求逆&quot;，但这是 RoPE 的特殊性质，不能推广到其他模块。</p>
+</blockquote>
+<p>下面复用前向文档二里的 toy 模型，选一个 GQA 分组（Q0～Q3 共享的 KV head 0）完整手推；另一组 Q4～Q7/KV head 1 方法完全相同，不再重复手算。</p>
+<h5>(a) 反向的第一步：O 投影反向 + concat 拆分</h5>
+<p>这个 Block 的 Attention 分支收到的梯度，是 5.1 汇总公式里 $g_u$ 对应到 attention 输出那部分，记为 $\dfrac{\partial L}{\partial \text{attn\_out}}$：</p>
+<p>$$\frac{\partial L}{\partial \text{attn\_concat}} = \frac{\partial L}{\partial \text{attn\_out}}\,W_O^\top, \qquad \frac{\partial L}{\partial W_O} = \text{attn\_concat}^\top \frac{\partial L}{\partial \text{attn\_out}}$$</p>
+<p>concat 的反向就是 split——把 $[1,4096]$ 的梯度按 32 个 head 的边界切开，得到每个 head 各自的 $\dfrac{\partial L}{\partial o_h}$。</p>
+<p><strong>回顾 toy 模型设置</strong>：8 个 Query head，2 个 KV head（每 4 个 Q head 共享 1 个 KV head），<code>head_dim=2</code>。token 4&quot;有趣&quot;的 Q0～Q3 使用 KV head 0：</p>
+<ul>
+<li>$q_{4,0}=[2,0],\ q_{4,1}=[0,2],\ q_{4,2}=[-2,0],\ q_{4,3}=[0,-2]$</li>
+<li>KV head 0 的 $k,v$（4 个位置）：$k_1=v_1=[1,0]$（机器），$k_2=v_2=[0,1]$（学习），$k_3=v_3=[-1,0]$（很），$k_4=v_4=[0,-1]$（有趣）</li>
+<li>Softmax 权重（前向文档已算出）：<ul>
+<li>$\alpha_{0,\cdot} = [0.647,0.157,0.038,0.157]$</li>
+<li>$\alpha_{1,\cdot} = [0.157,0.647,0.157,0.038]$</li>
+<li>$\alpha_{2,\cdot} = [0.038,0.157,0.647,0.157]$</li>
+<li>$\alpha_{3,\cdot} = [0.157,0.038,0.157,0.647]$</li>
+</ul>
+</li>
+</ul>
+<p>为了让手算的数字干净，下面<strong>假设</strong> split 之后 Q0～Q3 拿到的梯度都是 $\dfrac{\partial L}{\partial o_{4,h}} = [1,0]$（真实训练中这四个值就是上面这一步 split 算出来的，通常互不相同）。</p>
+<p><strong>这个例子只固定了 query token $t=4$（&quot;有趣&quot;）</strong>。完整训练里，一个 $k_j,v_j$ 不仅要对同一 GQA 组内的 4 个 Query head 求和，还要对<strong>所有能看到位置 $j$ 的 query token</strong> 求和（因果掩码下即所有 $t\ge j$ 的 token）：</p>
+<p>$$\frac{\partial L}{\partial v_j} = \sum_{t\ge j}\ \sum_{h\in\text{group}}\alpha_{t,h,j}\cdot\frac{\partial L}{\partial o_{t,h}}$$</p>
+<p>下面 (b)～(e) 为了手算方便，只展开了 $t=4$ 这一个 query token 对 $k_j,v_j$ 的贡献；其余 $t=1,2,3$（&quot;机器&quot;&quot;学习&quot;&quot;很&quot;各自作为 query 时）需要按同样的公式再累加一遍，真实实现里这是张量运算自动完成的，不需要手动循环。</p>
+<h5>(b) 对 V 的梯度：$o=\sum_j \alpha_j v_j$</h5>
+<p>$$\frac{\partial L}{\partial v_j}\Big|_{\text{来自 }t=4,\text{head }h} = \alpha_{h,j}\cdot\frac{\partial L}{\partial o_{4,h}}$$</p>
+<p><strong>这里就是 GQA 梯度累加发生的地方（先看同一 query token 内跨 head 的累加）</strong>：$v_j$ 在前向时被 Q0～Q3 这 4 个 head <strong>同时读取</strong>（规则 2 的分支相加），所以仅考虑 $t=4$ 这一项时：</p>
+<p>$$\frac{\partial L}{\partial v_j}\Big|_{t=4} = \sum_{h=0}^{3}\alpha_{h,j}\cdot\frac{\partial L}{\partial o_{4,h}}$$</p>
+<p>代入数字（4 个 head 的 do 都是 $[1,0]$，所以每个位置 $j$ 只需要把 4 个 $\alpha_{h,j}$ 加起来）：</p>
+<p>$$\sum_h \alpha_{h,1} = 0.647+0.157+0.038+0.157 = 0.999 \approx 1$$</p>
+<p>（对&quot;学习&quot;&quot;很&quot;&quot;有趣&quot;三个位置算出来同样约等于 1——这是这个对称 toy 例子的巧合，不是一般规律，本质原因是 4 个 Q 向量恰好是同一个模式的旋转排列。）</p>
+<p>$$\frac{\partial L}{\partial v_j}\Big|_{t=4} \approx [1,\ 0] \quad \text{对 } j=1,2,3,4 \text{ 都成立}$$</p>
+<p>（如上所述，这只是 $t=4$ 这一项；$v_j$ 的完整梯度还要加上 $t=1,2,3$ 里能看到位置 $j$ 的那些贡献。）</p>
+<p><strong>直觉</strong>：一个 KV head 前向时被 4 个 Q head &quot;共用&quot;，反向时它收到的梯度就是这些 Q head 各自传回来的梯度<strong>叠加</strong>。更准确的口径是：$QK^\top$、softmax、$\alpha V$ 这部分反向计算量仍然按 Query head 数（32 个）来算，通常不会因为 GQA 而缩小 4 倍；真正缩小的是 $W_K,W_V$ 的前向/反向投影计算量，以及 $K,V$ 张量本身的存储和显存带宽（这也是前向文档强调 KV Cache 降为 1/4 的原因）。所以&quot;GQA 让反向计算量变小&quot;这句话不完全准确——它省的主要是 K/V 投影和显存/带宽开销，而不是整个 attention 部分的计算量。</p>
+<h5>(c) 对 softmax 输入（score）的梯度——以 Q0 为例完整算一遍</h5>
+<p>Softmax 反向的标准公式：若 $\alpha=\text{softmax}(s)$，已知 $\dfrac{\partial L}{\partial \alpha_j}$，则</p>
+<p>$$\frac{\partial L}{\partial s_j} = \alpha_j\left(\frac{\partial L}{\partial \alpha_j} - \sum_l \alpha_l\frac{\partial L}{\partial \alpha_l}\right)$$</p>
+<p>先算 $\dfrac{\partial L}{\partial \alpha_j}\Big|_{h=0} = \dfrac{\partial L}{\partial o_{4,0}}\cdot v_j = [1,0]\cdot v_j$：</p>
+<p>$$[d\alpha_1,d\alpha_2,d\alpha_3,d\alpha_4] = [1,\ 0,\ -1,\ 0]$$</p>
+<p>（$v_1=[1,0]\Rightarrow 1$；$v_2=[0,1]\Rightarrow 0$；$v_3=[-1,0]\Rightarrow -1$；$v_4=[0,-1]\Rightarrow 0$）</p>
+<p>$$\sum_l \alpha_l\,d\alpha_l = 0.647(1)+0.157(0)+0.038(-1)+0.157(0) = 0.609$$</p>
+<p>代入 softmax 反向公式：</p>
+<p>$$ds_1 = 0.647(1-0.609)=0.253,\quad ds_2=0.157(0-0.609)=-0.096$$
+$$ds_3 = 0.038(-1-0.609)=-0.061,\quad ds_4=0.157(0-0.609)=-0.096$$</p>
+<p><strong>校验</strong>：$\sum_j ds_j$ 应该恒等于 0（softmax 雅可比矩阵的性质），$0.253-0.096-0.061-0.096\approx 0$ ✓。这条校验在写代码时非常实用——如果反向传播实现里 $\sum ds_j \neq 0$，说明公式敲错了。</p>
+<p>score 是 $s_j = q\cdot k_j/\sqrt{d_\text{head}} = q\cdot k_j/\sqrt2$，所以 $\dfrac{\partial L}{\partial(q\cdot k_j)} = ds_j/\sqrt2$：</p>
+<p>$$[0.179,\ -0.068,\ -0.043,\ -0.068]$$</p>
+<h5>(d) 对 Q 的梯度（Q0 不与其他 head 共享，这里不需要累加）</h5>
+<p>$$\frac{\partial L}{\partial q_{4,0}} = \sum_j \frac{\partial L}{\partial(q\cdot k_j)}\cdot k_j = 0.179[1,0]-0.068[0,1]-0.043[-1,0]-0.068[0,-1]$$</p>
+<p>$$= [0.179+0.043,\ -0.068+0.068] = [0.222,\ 0]$$</p>
+<h5>(e) 对 K 的梯度——同样需要 GQA 累加（这里只算 $t=4$ 这一项）</h5>
+<p>$$\frac{\partial L}{\partial k_j}\Big|_{t=4} = \sum_{h=0}^{3}\frac{\partial L}{\partial(q_h\cdot k_j)}\cdot q_h$$</p>
+<p>以位置 1（&quot;机器&quot;）为例，需要 Q0～Q3 各自对 $k_1$ 的贡献（按 (c)(d) 同样步骤对 Q1、Q2、Q3 各算一遍，可得 $\dfrac{\partial L}{\partial(q_h\cdot k_1)}$ 分别为 $0.179,\ 0.111,\ 0.043,\ 0.111$）：</p>
+<p>$$\frac{\partial L}{\partial k_1}\Big|_{t=4} = 0.179\,q_0 + 0.111\,q_1 + 0.043\,q_2 + 0.111\,q_3$$</p>
+<p>$$= 0.179[2,0]+0.111[0,2]+0.043[-2,0]+0.111[0,-2] \approx [0.272,\ 0]$$</p>
+<p>同样地，$k_2,k_3,k_4$ 也各自要把 Q0～Q3（这一个 query token 内）的贡献加起来——<strong>这就是&quot;4 个 Q head 共享 1 个 KV head&quot;在反向传播里的确切含义：$k_j$（以及上面算过的 $v_j$）在同一个 query token 下的梯度是 4 条链路梯度的和</strong>。别忘了 (a) 末尾提到的另一层累加：真实的 $k_1$ 总梯度还要再加上 $t=1,2,3$ 各自对位置 1 的贡献。</p>
+<h5>(f) RoPE 反向：旋转矩阵的转置就是逆旋转</h5>
+<p>RoPE 前向是对每两维做一次旋转：$q' = R_p\,q$，其中 $R_p$ 是正交旋转矩阵（$R_p^\top R_p = I$）。旋转矩阵的转置恰好等于它的逆，也等于&quot;反向旋转同一个角度&quot;：</p>
+<p>$$R_p^\top = R_p^{-1} = R_{-p}$$</p>
+<p>所以 RoPE 的反向传播极其简单——<strong>把梯度按相同的角度反向旋转回去</strong>：</p>
+<p>$$\frac{\partial L}{\partial q} = R_p^\top \frac{\partial L}{\partial q'} = R_{-p}\left(\frac{\partial L}{\partial q'}\right)$$</p>
+<p>（对 $K$ 同理，$V$ 没有 RoPE，不需要这一步）</p>
+<p><strong>数值例子</strong>（独立于上面的 toy 模型，只演示这个性质）：设某平面上旋转角 $\theta=30°$，$R_\theta=\begin{bmatrix}\cos30°&-\sin30°\\\sin30°&\cos30°\end{bmatrix}\approx\begin{bmatrix}0.866&-0.5\\0.5&0.866\end{bmatrix}$。若传入的梯度 $\dfrac{\partial L}{\partial q'}=[1,0]$，反向旋转（乘 $R_\theta^\top$，即用 $-30°$）：</p>
+<p>$$R_\theta^\top[1,0]^\top = [\cos30°,\ -\sin30°]=[0.866,\ -0.5]$$</p>
+<p>（对照：把 $[1,0]$ 按 $-30°$ 旋转得到 $[\cos(-30°),\sin(-30°)]=[0.866,-0.5]$，两种算法一致 ✓）</p>
+<p>对上面 (d)(e) 算出的 $\dfrac{\partial L}{\partial q_{4,0}}$、$\dfrac{\partial L}{\partial k_j}$，实际训练代码里这一步就是把它们按各自 token 位置对应的旋转角<strong>转回去</strong>，得到 RoPE 之前（也就是 $W_Q,W_K$ 投影输出）的梯度。</p>
+<h5>(g) Q/K/V 投影反向</h5>
+<p>这一步有一个容易被忽略的<strong>形状不对称</strong>：$q_\text{proj}$ 只属于当前这一个 query token，reshape 拼回各 head 后是 $[1,4096]$；而当前 $t=4$ 的 query 需要读取位置 $1\sim S$ 的整段 K/V（并不是&quot;所有位置共用同一个 $K,V$ 向量&quot;——每个位置仍有自己的 $K_j,V_j$，只是它们都会被这一个 query 用到），所以 (e) 算出的 $\partial L/\partial k_j$ 是<strong>每个位置</strong> $j$ 各自一份，要按序列位置拼成 $[S,1024]$（$S$ 是 K/V 覆盖的序列长度），而不是像 $q_\text{proj}$ 那样的单行 $[1,1024]$。真实的批次+序列写法是 $dq_\text{proj}:[B,S,4096]$，$dk_\text{proj},dv_\text{proj}:[B,S,1024]$（完整序列训练里 $S$ 对 Q 和 K/V 是同一个维度，本文按 (a) 的设定为了手算方便只展开了 $t=4$ 这一行）。</p>
+<p>拿到这些之后，套用第三节的线性层反向公式。在本文这个&quot;只展开 $t=4$&quot;的局部例子里，$X$ 在 Q 分支和 K/V 分支里对应的形状并不相同，要分开写：</p>
+<p>$$\frac{\partial L}{\partial W_Q} = X_{t=4}^\top \frac{\partial L}{\partial q_\text{proj}}, \qquad \frac{\partial L}{\partial X}\Big|_Q = \frac{\partial L}{\partial q_\text{proj}}\,W_Q^\top \qquad (X_{t=4}:[1,4096])$$</p>
+<p>$$\frac{\partial L}{\partial W_K} = X_{1:S}^\top \frac{\partial L}{\partial k_\text{proj}}, \qquad \frac{\partial L}{\partial W_V} = X_{1:S}^\top \frac{\partial L}{\partial v_\text{proj}} \qquad (X_{1:S}:[S,4096])$$</p>
+<p>同理得到 $\dfrac{\partial L}{\partial X}\big|_K,\dfrac{\partial L}{\partial X}\big|_V$（也是 $[S,4096]$）。完整序列训练时，Q 分支自然也覆盖所有 $S$ 个位置，三者会统一成 $[B,S,4096]$，不再需要区分 $X_{t=4}$ 和 $X_{1:S}$——这个区分只在本文&quot;单 query token 演示&quot;这个局部例子里才存在。</p>
+<h5>(h) 汇总：$X$（第一个 Pre-RMSNorm 输出）的总梯度</h5>
+<p>$X$ 同时走了 $Q,K,V$ 三条投影支路（又是第〇节的规则 2）：</p>
+<p>$$\frac{\partial L}{\partial X} = \frac{\partial L}{\partial X}\Big|_Q + \frac{\partial L}{\partial X}\Big|_K + \frac{\partial L}{\partial X}\Big|_V$$</p>
+<p>按 token 位置对齐后再相加：在完整序列训练里，每个位置的 $X$ 既是它自己那个 query 的输入，又是它作为 K/V 提供者的输入，所以三个分支在<strong>同一个位置</strong>上都是 $[1,4096]$（合起来 $[S,4096]$）。本文的手算例子里 Q 只展开了 $t=4$ 这一个位置，所以上面的求和严格来说只在&quot;位置 4&quot;这一行成立——$X$ 在其他位置（1,2,3）的总梯度，还需要各自位置的 Q 分支（本文未展开）加上它们作为 K/V 分支时收到的梯度。</p>
+<h4>9.5.5 第一个 Pre-RMSNorm 反向</h4>
+<p>5.4(h) 算出的 $\dfrac{\partial L}{\partial X}$ 是对 <strong>Norm1 输出</strong> $X=\text{Norm}_1(x)$ 的梯度，<strong>还不是</strong>对 Block 输入 $x$ 的梯度——必须再套用一次第四节的 RMSNorm 反向公式才能转换过去（这一步很容易被漏掉：如果直接把 $\partial L/\partial X$ 当成 $\partial L/\partial x$ 使用，相当于漏做了一次 RMSNorm 的雅可比变换）。</p>
+<p>按第四节的记号，先算 $g_i = \dfrac{\partial L}{\partial X_i}\cdot w_i$（$w$ 是 Norm1 的缩放参数），再代入</p>
+<p>$$\Big(g_x^{(\text{attn})}\Big)_j = \frac{1}{r}\left[g_j - \frac{n_j}{d}\sum_i g_i n_i\right]$$</p>
+<p>得到 Attention 分支对 Block 输入的贡献 $g_x^{(\text{attn})} = \partial L/\partial x\big|_{\text{Attention 分支}}$——这正是 5.1 汇总公式里 $J_{\text{Norm}_1}^\top J_{\text{Attention}}^\top g_u$ 这一整项。</p>
+<p>按 5.1 的合并公式，把它加回直通残差的 $g_u$，得到这个 Block 完整的输入梯度：</p>
+<p>$$g_x = g_u + g_x^{(\text{attn})}$$</p>
+<p>$g_x$ 就是要传给上一个 Block（第 31 层，如果当前是第 32 层）的完整梯度，对应上一个 Block 里的 $g_y$。</p>
+<p><strong>至此一层 Block 的反向传播完整走完，32 层重复这个流程（顺序是从第 32 层往第 1 层，每层用上一层的 $g_x$ 当作自己的 $g_y$）。</strong></p>
+<hr />
+<h3>9.6 Embedding 反向——数据梯度是行稀疏的，但更新方式因实现而异</h3>
+<p>前向：$x_0 = E[\text{token\_id}, :]$（查表，只取一行）。</p>
+<p>反向：</p>
+<p>$$\frac{\partial L}{\partial E[\text{token\_id}, :]} \mathrel{+}= \frac{\partial L}{\partial x_0}$$</p>
+<p><strong>关键点</strong>：$E$ 是 $[128256, 4096]$ 的大矩阵。一个 microbatch 里 token <strong>位置</strong>数是 $B\times S$（大 batch、长序列下可能有数万甚至更多），不同的 <strong>token ID</strong> 数最多是 $\min(B\times S,\ |V|)$——多数训练场景下这个数字仍然远小于词表大小 128256。</p>
+<p>如果还用了<strong>梯度累积</strong>（一次优化器更新前连续跑 $A$ 个 microbatch 才 <code>zero_grad()</code>），这是另一件独立的事：在梯度真正清零之前，Embedding 收到非零梯度的行数上限要相应放大到 $\min(A\times B\times S,\ |V|)$，不能直接套用单个 microbatch 的 $\min(B\times S,|V|)$。</p>
+<p>上面 $\min(A\times B\times S,|V|)$ 说的是 AllReduce <strong>之前</strong>、单个数据并行 rank 本地看到的覆盖量。如果训练还用了数据并行（并行度 $D$，各 rank 各自算本地梯度，AllReduce 汇总后再统一更新），AllReduce <strong>之后</strong>全局的覆盖量上限要再乘上 $D$，变成 $\min(D\times A\times B\times S,\ |V|)$——这是&quot;单 rank、汇总前&quot;和&quot;全局、汇总后&quot;两个不同阶段各自的上限，不要混用。</p>
+<p>所以大部分行的梯度是 0，但不能笼统地说&quot;出现过的 token 最多几千个&quot;或&quot;绝大多数行一定为零&quot;，这取决于 batch 大小、序列长度、是否梯度累积和词表大小的相对关系。更稳妥的说法是：数据梯度在给定的梯度累积窗口内<strong>通常</strong>具有行稀疏结构。</p>
+<p>但这不等于&quot;实际训练一定按稀疏方式更新&quot;：PyTorch 的 <code>nn.Embedding</code> 默认产生<strong>稠密</strong>梯度（整个 $[128256,4096]$ 都会分配显存并参与更新），只有显式设置 <code>sparse=True</code> 才会得到稀疏梯度；大规模 LLM 训练里 Embedding 通常还会做张量/词表并行切分，AdamW 的权重衰减也可能作用到没出现过的行上。所以更准确的说法是：Embedding lookup 的数据梯度在行维度上具有稀疏结构，但实际是否使用稀疏梯度、稀疏更新，取决于具体框架、优化器和分布式实现，不能一概而论。</p>
+<p>FLOPs 量级上，Embedding 查表本身远小于一次矩阵乘法，在&quot;系数 6&quot;的估算里可以忽略不计；但<strong>不能</strong>因此认为 LM Head 主导了整体计算量——LM Head 只是单独一层里最大的一次矩阵乘法（约 5.25 亿参数），而 32 层 Transformer Block 的线性层参数总量约 70 亿（LM Head 的 13 倍以上），整体训练/推理计算量仍然由 32 层 Block 主导，LM Head 只是其中&quot;单层最大&quot;的那一次。</p>
+<hr />
+<h3>9.7 用代码校验公式（推荐做法，而不是继续手算）</h3>
+<p>手推到这里已经能覆盖 RMSNorm、GQA、RoPE、SwiGLU 四个 LLaMA-3 特有模块的反向传播。继续用纸笔验证更大的例子容易出算术错误，更可靠的做法是写几行 PyTorch，用 <code>torch.autograd</code> 当作&quot;标准答案&quot;来对照自己手推的公式。</p>
+<p><strong>RMSNorm 反向校验</strong>（对应第四节）：</p>
+<pre><code class="language-python">import torch
+
+def rmsnorm(x, w, eps=1e-6):
+    r = torch.sqrt((x**2).mean(-1, keepdim=True) + eps)
+    return x / r * w
+
+x = torch.tensor([1., 2., 3.], requires_grad=True)
+w = torch.tensor([1., 1., 1.], requires_grad=True)
+y = rmsnorm(x, w)
+loss = y.sum()
+loss.backward()
+
+print(&quot;autograd dL/dx:&quot;, x.grad)   # 与第四节公式手算结果对比
+print(&quot;autograd dL/dw:&quot;, w.grad)
+</code></pre>
+<p><strong>GQA + softmax 反向校验（单个 query token）</strong>：把 toy 模型的 $q_{4,0..3}$、$k_{1..4}$、$v_{1..4}$（这些数值已经是 RoPE 之后的）搭成计算图，用 <code>.backward()</code> 让 <code>k.grad</code>、<code>v.grad</code> 自动算出来的<strong>只是</strong> $t=4$ 这一个 query token 的贡献（用 <code>torch.autograd.grad(...)</code> 也能拿到同样的结果，区别只是它直接返回梯度、不写进 <code>.grad</code>；下面统一用 <code>.backward()</code>）——因为图里根本没有其他 query token，不会自动出现跨 query token 的累加。这正好可以拿来对照本文 (b)～(e) 手算的 <code>[0.272, 0]</code>（$t=4$ 这一项对 $dk_1$ 的贡献）：</p>
+<pre><code class="language-python">import torch
+
+k = torch.tensor([[1.,0.],[0.,1.],[-1.,0.],[0.,-1.]], requires_grad=True)   # k_1..k_4
+v = k.clone().detach().requires_grad_(True)                                  # toy 里 v 和 k 数值相同
+q = torch.tensor([[2.,0.],[0.,2.],[-2.,0.],[0.,-2.]], requires_grad=True)    # q_{4,0..3}
+
+scores = q @ k.T / (2 ** 0.5)          # [4,4]，第 h 行是 Q_h 对 4 个 KV 位置的得分
+alpha = torch.softmax(scores, dim=-1)
+o = alpha @ v                          # [4,2]
+
+o[:, 0].sum().backward()               # 只对第 0 维求和，对应下游梯度 dL/do_{4,h}=[1,0]（不是 o.sum()，那样会变成 [1,1]）
+print(&quot;dk (仅 t=4 贡献):&quot;, k.grad)     # 与手算的 dk_1≈[0.272,0] 等数字对照
+print(&quot;dv (仅 t=4 贡献):&quot;, v.grad)
+</code></pre>
+<p><strong>跨 query token 的累加校验</strong>（对应 (a) 提到的 $\sum_{t\ge j}$）：要看到 $k_j,v_j$ 在多个 query token 之间的梯度累加，必须让计算图里同时存在多个 query token，并加上因果掩码——上面的单 token 例子做不到这一点。光打印一次联合 backward 的 <code>K.grad</code> 只能说明&quot;算出了一个梯度&quot;，还不足以严格验证 $dK_j^{\text{total}}=\sum_{t\ge j}dK_j^{(t)}$ 这条求和关系本身——下面把&quot;联合 backward&quot;和&quot;逐个 query token 分别求梯度再手动累加&quot;两种算法都跑一遍，对照它们是否一致：</p>
+<pre><code class="language-python">import torch
+
+seq_len, d = 4, 2
+n_q, n_kv = 4, 2     # 真正的 GQA：每 2 个 Query head 共享 1 个 KV head
+                     # （n_kv=1 会退化成 MQA 特例，repeat_interleave(n_q,...) 也只在 n_kv=1 时凑巧正确，这里改成通用写法）
+n_rep = n_q // n_kv
+Q = torch.randn(seq_len, n_q, d, requires_grad=True)
+K = torch.randn(seq_len, n_kv, d, requires_grad=True)
+V = torch.randn(seq_len, n_kv, d, requires_grad=True)
+
+def attn_out():
+    K_rep = K.repeat_interleave(n_rep, dim=1)   # 按 n_rep 展开；要求 n_q % n_kv == 0（真实 GQA 配置都满足，否则整数除法截断会导致展开后 head 数不等于 n_q，einsum 维度报错）
+    V_rep = V.repeat_interleave(n_rep, dim=1)
+    scores = torch.einsum('thd,shd-&gt;hts', Q, K_rep) / d ** 0.5
+    causal_mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
+    scores = scores.masked_fill(causal_mask, float('-inf'))
+    alpha = torch.softmax(scores, dim=-1)
+    return torch.einsum('hts,shd-&gt;thd', alpha, V_rep)   # [seq_len, n_q, d]，第 0 维是 query token t
+
+# 算法一：把所有 query token 的 loss 加在一起，一次性 backward
+out = attn_out()
+out.sum().backward()
+dK_joint = K.grad.clone()
+
+# 算法二：每个 query token t 的 loss 单独拿出来求梯度，再手动累加成 sum_t dK^(t)
+K.grad = None
+out2 = attn_out()
+dK_per_t = torch.zeros_like(K)
+for t in range(seq_len):
+    dK_t, = torch.autograd.grad(out2[t].sum(), K, retain_graph=True)
+    dK_per_t += dK_t
+
+print(&quot;联合 backward:      &quot;, dK_joint)
+print(&quot;逐 t 分别求梯度再累加:&quot;, dK_per_t)
+print(&quot;两者是否一致:&quot;, torch.allclose(dK_joint, dK_per_t))   # 应为 True，这才是对 sum_{t&gt;=j} 这条累加关系的严格校验
+</code></pre>
+<p><strong>RoPE 反向校验</strong>：前向文档给出的 $q,k$ 数值已经是 RoPE 之后的结果，直接拿它们搭图<strong>验证不了 RoPE</strong>——要验证 RoPE，必须在计算图里真正执行一次旋转：</p>
+<pre><code class="language-python">import torch
+
+def rope(x, theta):
+    x1, x2 = x[..., 0], x[..., 1]
+    c, s = torch.cos(theta), torch.sin(theta)
+    return torch.stack([x1 * c - x2 * s, x1 * s + x2 * c], dim=-1)
+
+q_pre = torch.tensor([1.3, 0.7], requires_grad=True)
+theta = torch.tensor(0.5)
+
+q_rope = rope(q_pre, theta)
+(q_rope * torch.tensor([1., 0.])).sum().backward()   # 假设 dL/dq_rope = [1,0]
+
+manual = rope(torch.tensor([1., 0.]), -theta)         # 按 -theta 反向旋转（本文 (f) 的公式）
+print(&quot;autograd:&quot;, q_pre.grad)
+print(&quot;manual  :&quot;, manual)   # 两者应该一致
+</code></pre>
+<p>这个&quot;手推公式 + 代码验证&quot;的组合，正是从&quot;看懂训练机理&quot;过渡到&quot;能写训练代码&quot;最实际的路径——公式保证你理解每一步在干什么，代码校验保证你写对了。</p>
+<hr />
+<h3>9.8 反向传播 FLOPs：把&quot;系数 6&quot;拆开看</h3>
+<p>前向文档提到训练 FLOPs 估算公式 $6NT$，并简单解释&quot;前向 $2NT$，反向 $4NT$&quot;。现在有了具体的反向传播步骤，可以把这三个 $2NT$ 分别对应到哪个矩阵乘法说清楚：</p>
+<table>
+<thead>
+<tr>
+  <th>项</th>
+  <th>对应的计算</th>
+  <th>典型例子（以 $W_Q$ 为例）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>前向 $2NT$</td>
+  <td>$Y=XW$</td>
+  <td>$q_\text{proj}=X W_Q$</td>
+</tr>
+<tr>
+  <td>反向 $2NT$（对权重的梯度）</td>
+  <td>$\dfrac{\partial L}{\partial W}=X^\top\dfrac{\partial L}{\partial Y}$</td>
+  <td>$\dfrac{\partial L}{\partial W_Q}=X^\top\dfrac{\partial L}{\partial q_\text{proj}}$</td>
+</tr>
+<tr>
+  <td>反向 $2NT$（对输入的梯度）</td>
+  <td>$\dfrac{\partial L}{\partial X}=\dfrac{\partial L}{\partial Y}W^\top$</td>
+  <td>$\dfrac{\partial L}{\partial X}\big|_Q=\dfrac{\partial L}{\partial q_\text{proj}}\,W_Q^\top$</td>
+</tr>
+</tbody>
+</table>
+<p>三次矩阵乘法形状完全对称（都是 $[\text{token 数}, d]\times[d,d']$ 或转置形式），每次 FLOPs 都约等于 $2NT$（$N$=该矩阵参数量，$T$=token 数），加起来约为 $6NT$。这也解释了为什么&quot;对输入的梯度&quot;这一项不能省——即使某一层的权重已经不需要更新（比如冻结），只要它前面还有需要训练的层，$\dfrac{\partial L}{\partial X}$ 这一项梯度也必须算，否则梯度传不到更前面的层。</p>
+<p><strong>但要强调</strong>：$6NT$ 只在&quot;参数矩阵的三次矩阵乘法&quot;这个简化模型下<strong>近似</strong>成立，不是精确的 FLOPs 恒等式。它忽略或粗略处理了：attention 里和序列长度平方相关的 $S^2$ 项（前向文档七节单独算过）、softmax/RMSNorm/RoPE/激活函数这些非矩阵乘法的开销、Embedding 查表（不像普通线性层那样对每个 token 做一次完整的稠密矩阵乘法）、优化器更新本身的开销，以及梯度检查点带来的前向重算。更准确的理解是：&quot;$6NT$ 是参数量主导时的量级估算&quot;，不是逐项精确相加的恒等式。</p>
+<hr />
+<h3>9.9 一次完整训练 step 的伪代码</h3>
+<p>下面是<strong>框架无关</strong>的伪代码。如果照抄成 PyTorch，要注意 <code>torch.nn.functional.cross_entropy</code> 默认要求类别维在第二维，不能直接传 <code>[B,S,V]</code> 配 <code>[B,S]</code>，需要先展平（有 padding 的话还要设置 <code>ignore_index</code> 跳过无效 token）：</p>
+<pre><code class="language-python">for batch in dataloader:
+    tokens, targets = batch                     # tokens: [B, S], targets: [B, S]（错位一位）
+
+    # ---- 前向（对应两篇前向文档的内容）----
+    logits = model(tokens)                       # [B, S, 128256]
+
+    # ---- Loss（本文第二节）----
+    # PyTorch 实际写法：cross_entropy(logits.reshape(-1, V), targets.reshape(-1), ignore_index=pad_id)
+    loss = cross_entropy(logits, targets)
+
+    # ---- 反向（本文第三～六节，框架自动完成链式法则）----
+    loss.backward()
+    # 框架内部做的事情，从后往前，正是本文 3→4→5→6 节的顺序：
+    #   dL/dlogits → LM Head 反向 → Final RMSNorm 反向
+    #   → 第32层 Block 反向 → ... → 第1层 Block 反向 → Embedding 反向（数据梯度行稀疏）
+
+    # ---- 优化器更新 ----
+    optimizer.step()      # 用每个参数的 .grad 更新参数（Adam 还会维护一阶/二阶矩）
+    optimizer.zero_grad() # 清空梯度，避免和下一个 batch 的梯度叠加
+</code></pre>
+<p>框架（PyTorch/JAX）自动帮你做的，正是本文手推的这一整套公式；理解了这套公式，再看 <code>loss.backward()</code> 内部或者手写一个 Transformer 训练循环时，就知道每一行梯度对应的是前向的哪一步、为什么某些地方要做梯度累加（GQA、SwiGLU、残差）、为什么某些地方梯度是稀疏的（Embedding）。</p>
+<hr />
+<h3>9.10 简单提一句：训练显存为什么比推理大得多</h3>
+<p>推理和训练要保存的其实是<strong>两套不同的内存结构</strong>，不是&quot;训练在推理的基础上多存一点&quot;：</p>
+<ul>
+<li><strong>推理</strong>（自回归 decode）：参数 + 当前步的临时激活 + <strong>跨生成步骤保留</strong>的 KV Cache（每一层都要留，前向文档六、七节算过，LLaMA-3 8B 在 8K 上下文、batch=1、BF16 精度下约 1GB；batch 增大或换精度会等比例变化）。推理不需要反向传播，所以不会保留 softmax 权重、SiLU 中间值这些只有 backward 才用得到的量。</li>
+<li><strong>训练</strong>：参数 + 梯度 + 优化器状态 + <strong>为反向传播保存或重算的激活</strong>。标准的整段序列训练通常一次前向就算完整个序列的 Q/K/V/attention/FFN，不需要像自回归 decode 那样跨步骤缓存 KV；真正的训练显存开销是下面这几项：</li>
+</ul>
+<ol>
+<li><strong>反向传播要用到的中间激活</strong>（比如 RMSNorm 的 $n_i$、softmax 的 $\alpha$、SiLU 的 $\sigma(G)$——本文推导里出现过的这些中间量，前向时都要留着，反向才能用），这也是为什么&quot;梯度检查点（gradient checkpointing）&quot;要用算力换显存：不存这些中间激活，反向时重新算一遍。（不同实现保留的粒度不同：普通 attention 实现会显式保留完整的 softmax 矩阵 $\alpha$，完整逻辑形状是 $[B,H,S,S]$（$H=n_q=32$ 是 Query head 数——GQA 下 attention 权重仍然按 Query head 数存在，不会因为 KV head 少而变小；前面为了突出 $S^2$ 这一项只简写成 $[S,S]$，省略 $B,H$ 会明显低估这块显存的实际规模）；前向文档提到的 FlashAttention 这类融合 kernel 并不保留完整的 $\alpha$，只保留更小的统计量（如每行的最大值、归一化常数），反向时在 SRAM 里分块重新计算所需的 $\alpha$，这是它省显存的另一个来源。）</li>
+<li><strong>每个参数的梯度</strong>（元素数量和参数相同，但字节数不一定相同——梯度常用 FP32 存储，即使参数本身是 BF16）。</li>
+<li><strong>优化器状态</strong>（Adam 要存一阶矩和二阶矩，各和参数同样大小）。</li>
+</ol>
+<p>以混合精度 + AdamW 为例，几种常见配置按每参数字节数拆开算（权重 / 梯度 / Adam 一阶矩 $m$ / Adam 二阶矩 $v$ / FP32 master weight）：</p>
+<table>
+<thead>
+<tr>
+  <th>配置</th>
+  <th style="text-align:right">权重</th>
+  <th style="text-align:right">梯度</th>
+  <th style="text-align:right">$m$</th>
+  <th style="text-align:right">$v$</th>
+  <th style="text-align:right">master weight</th>
+  <th style="text-align:right">合计</th>
+  <th style="text-align:right">相对 BF16 权重(2B)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>无 master weight，梯度用 BF16</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">0</td>
+  <td style="text-align:right">12</td>
+  <td style="text-align:right">6×</td>
+</tr>
+<tr>
+  <td>无 master weight，梯度用 FP32</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">0</td>
+  <td style="text-align:right">14</td>
+  <td style="text-align:right">7×</td>
+</tr>
+<tr>
+  <td>带 FP32 master weight 的混合精度（BF16 权重+梯度 + FP32 master + Adam）</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">16</td>
+  <td style="text-align:right">8×</td>
+</tr>
+<tr>
+  <td>梯度和 master weight 都用 FP32</td>
+  <td style="text-align:right">2</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">4</td>
+  <td style="text-align:right">18</td>
+  <td style="text-align:right">9×</td>
+</tr>
+</tbody>
+</table>
+<p>不同实现不会任意组合这几项，但也没有统一的&quot;标准&quot;配置——有的训练栈长期保存 FP32 参数、计算时临时转成 BF16；有的长期存 BF16 参数、另外维护一份 FP32 master weight；有的 BF16 训练干脆不留独立 master copy；ZeRO/FSDP 等分布式优化器还会对参数、梯度、状态分别选择精度和分片方式。16 字节/参数（表中第三行）是文献里常被引用的一个混合精度配置，但不能说它是&quot;最常见&quot;的统一口径。总的来说，<strong>在表格假设的&quot;未分片、常规 FP32 AdamW 状态&quot;这个前提下</strong>，一般落在 <strong>6～9 倍</strong>之间，比&quot;权重+梯度+优化器各算一份&quot;这种粗略估计的 3~4 倍要大得多；如果用了 8-bit optimizer、ZeRO/FSDP 分片、optimizer offload 或其他参数主副本策略，单卡实际比例会明显偏离这个范围，不能把 6～9 倍当成所有训练系统的统一结论。ZeRO / FSDP 等显存分片策略会把这部分状态摊到多张 GPU 上，单卡实际占用要另算。这属于显存管理范畴，超出本文&quot;反向传播数学&quot;的范围，值得单独写一篇。</p>
+<hr />
+<h3>9.11 小结</h3>
+<blockquote>
+<p>LLaMA-3 8B 的反向传播 = 交叉熵梯度 $p-y$ 从 logits 出发，经过 LM Head、Final RMSNorm、32 层 Block（每层：残差直通 + SwiGLU 反向（gate/up 分支梯度相加）+ RMSNorm 反向 + 注意力反向（O 投影 → concat 拆分 → 对 V 加权求和反向【dV 在此按 GQA 共享关系 + 跨 query token 累加】→ softmax 反向 → $QK^\top$ 反向得到 dQ、dK【dK 同样在此按 GQA + 跨 token 累加，不是放在 RoPE 之后才统一累加】→ RoPE 反向旋转回去 → Q/K/V 投影反向）+ 残差直通 + RMSNorm 反向），最终得到 Embedding 表的梯度（数据梯度按行稀疏，实际是否稀疏更新取决于框架实现）。核心是链式法则加&quot;分支相加&quot;这一条规则；GQA、SwiGLU、残差连接这三处设计在反向传播里都体现为&quot;一个变量的梯度等于它在前向中各个去处传回来的梯度之和&quot;。手推公式建立理解，<code>torch.autograd</code> 校验正确性，是从&quot;看懂训练机理&quot;走到&quot;能写训练代码&quot;最实际的路径。</p>
+</blockquote>
+<hr />
+
+<h2 id="sec10">十、总结</h2>
 <blockquote>
 <p><strong>LLaMA-3 8B 在 GPT-3 架构基础上做了四项关键改进：Pre-RMSNorm 让深层训练更稳定（去掉均值计算和偏置，Pre-Norm 顺序让梯度有直通路径）；GQA 把 KV Cache 从 MHA 的 4 GB（8K 上下文）压到 1 GB（降为 1/4），推理吞吐因此大幅提升；RoPE 把位置旋转进 Q/K 点积，天然表达相对距离并支持长上下文扩展，$\theta_\text{base}=500{,}000$ 是为 8K 上下文把旋转速度放慢 50 倍；SwiGLU 给 FFN 加了动态门控分支，用三次矩阵乘法换来更强的特征选择能力，中间维度 14336 是 Meta 实验选出的经验最优值（$= 112 \times 128$，非参数对齐直接推导）。训练了 15T+ token 后总计算量约 $7.23\times10^{23}$ FLOPs，Meta 披露实际用电约 910 MWh、碳排放 390 tCO₂eq，端到端 MFU 约 15.6%（以 H100 BF16 Dense 989 TFLOP/s 为基准）。</strong></p>
 </blockquote>
