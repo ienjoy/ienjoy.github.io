@@ -1055,7 +1055,7 @@ logits: [1, 128256]
 <p>一层 attention 二次项（$QK^\top$ + $AV$，按完整稠密 attention 矩阵计算 FLOPs 的口径——不一定代表优化 kernel 实际执行的计算量，见下文说明）：</p>
 <p>$$2 \times 2 \times n_q \times S^2 \times d_\text{head} = 2 \times 2 \times 32 \times 8192^2 \times 128 \approx 1.10 \times 10^{12}$$</p>
 <p>32 层总 FLOPs：</p>
-<p>$$32 \times (3.57 + 1.10) \times 10^{12} \approx \textbf{1.50 \times 10^{14}}$$</p>
+<p>$$32 \times (3.57 + 1.10) \times 10^{12} \approx \mathbf{1.50 \times 10^{14}}$$</p>
 <p>即 8K prompt 的一次 prefill，<strong>32 层 Transformer 主干</strong>（线性层 + attention 二次项）约 <strong>150 TFLOPs</strong>。</p>
 <p><strong>这个口径需要明确几点</strong>：</p>
 <ul>
@@ -1124,7 +1124,7 @@ logits: [1, 128256]
 <hr />
 <p>LLaMA-3 8B：</p>
 <p>$$N \approx 8.03 \times 10^9, \quad T \approx 15 \times 10^{12}$$</p>
-<p>$$6 \times 8.03 \times 10^9 \times 15 \times 10^{12} \approx \textbf{7.23 \times 10^{23} \text{ FLOPs}}$$</p>
+<p>$$6 \times 8.03 \times 10^9 \times 15 \times 10^{12} \approx \mathbf{7.23 \times 10^{23}}\ \text{FLOPs}$$</p>
 <p><strong>这里需要说明口径</strong>：Meta 披露的训练 token 数是&quot;15T+&quot;，本文代入的是恰好 $15\times10^{12}$——所以 $7.23\times10^{23}$ 是<strong>按 15T 这个基准值算出来的</strong>，真实训练用的 token 数只要超过 15T，对应的理论 FLOPs 也会相应更大；同时 $6NT$ 本身也只是一个近似公式（如上所述），不是真实 FLOPs 的精确下界。</p>
 <h3>Meta 披露的训练数据，以及据此推算的用电量</h3>
 <p>Meta 在 LLaMA-3 8B 的 model card 中<strong>披露</strong>了预训练计算：</p>
