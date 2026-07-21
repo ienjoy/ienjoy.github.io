@@ -237,13 +237,13 @@
 <nav aria-label="站点导航"><a class="back-link" href="index.html">← 返回文章首页</a></nav>
 
 <h1>LLaMA-3 8B 计算规模、信息流与能耗</h1>
-<p class="subtitle">整合自对话记录与 LLaMA-3 8B 架构图（<code>Llm arch 1080P.html</code>），涵盖 LLaMA-3 8B 架构参数、现代设计改动的来龙去脉（GQA / RoPE / SwiGLU / KV Cache）、完整前向传播数值演示、反向传播与训练机理，以及 FLOPs、训练显存和能耗的关系。</p>
+<p class="subtitle">整合自对话记录与 LLaMA-3 8B 架构图（<code>Llm arch 1080P.html</code>），涵盖 LLaMA-3 8B 架构参数、现代设计改动的来龙去脉（GQA / RoPE / SwiGLU / KV Cache）、前向传播的完整流程与部分示意数值、反向传播与训练机理，以及 FLOPs、训练显存和能耗的关系。</p>
 
 <div class="toc">
   <div class="toc-title">目录</div>
   <a href="#sec1">一、LLaMA-3 8B 基本参数</a>
   <a href="#sec2">二、从 GPT-3 到 LLaMA-3：四个关键设计改变</a>
-  <a href="#sec3">三、完整前向传播：用具体数值走一遍</a>
+  <a href="#sec3">三、前向传播：完整流程 + 部分示意数值走一遍</a>
   <a href="#sec4">四、一层 Block 参数量汇总</a>
   <a href="#sec5">五、32 层累计与总参数量</a>
   <a href="#sec6">六、KV Cache：为什么 GQA 对推理至关重要</a>
@@ -257,95 +257,174 @@
 
 <h2 id="sec1">一、LLaMA-3 8B 基本参数</h2>
 <table>
-<thead><tr><th>参数</th><th>数值</th></tr></thead>
+<thead>
+<tr>
+  <th>参数</th>
+  <th>数值</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>模型名称</td><td>LLaMA-3 8B</td></tr>
-<tr><td>发布机构</td><td>Meta</td></tr>
-<tr><td>发布日期</td><td>2024-04-18</td></tr>
-<tr><td>架构类型</td><td>Decoder-only Transformer</td></tr>
-<tr><td>参数量</td><td>约 8.03B</td></tr>
-<tr><td>训练 token 数</td><td>15T+</td></tr>
-<tr><td>上下文长度</td><td>8,192 tokens</td></tr>
-<tr><td>词表大小 $\lvert V\rvert$</td><td>128,256</td></tr>
-<tr><td>层数 $L$</td><td>32</td></tr>
-<tr><td>模型维度 $d_{\text{model}}$</td><td>4,096</td></tr>
-<tr><td>Query heads $n_q$</td><td>32</td></tr>
-<tr><td>KV heads $n_{kv}$</td><td>8</td></tr>
-<tr><td>每头维度 $d_{\text{head}}$</td><td>128（= 4096 ÷ 32）</td></tr>
-<tr><td>GQA 分组比例</td><td>每 4 个 Query head 共享 1 组 KV</td></tr>
-<tr><td>SwiGLU 中间维度</td><td>14,336</td></tr>
-<tr><td>位置编码</td><td>RoPE，$\theta = 500{,}000$</td></tr>
-<tr><td>Norm 方式</td><td>Pre-RMSNorm</td></tr>
-<tr><td>权重精度</td><td>BF16</td></tr>
-<tr><td>Embedding / LM Head</td><td>不共享权重</td></tr>
+<tr>
+  <td>模型名称</td>
+  <td>LLaMA-3 8B</td>
+</tr>
+<tr>
+  <td>发布机构</td>
+  <td>Meta</td>
+</tr>
+<tr>
+  <td>发布日期</td>
+  <td>2024-04-18</td>
+</tr>
+<tr>
+  <td>架构类型</td>
+  <td>Decoder-only Transformer</td>
+</tr>
+<tr>
+  <td>参数量</td>
+  <td>约 8.03B</td>
+</tr>
+<tr>
+  <td>训练 token 数</td>
+  <td>15T+</td>
+</tr>
+<tr>
+  <td>上下文长度</td>
+  <td>8,192 tokens</td>
+</tr>
+<tr>
+  <td>词表大小 $\lvert V\rvert$</td>
+  <td>128,256</td>
+</tr>
+<tr>
+  <td>层数 $L$</td>
+  <td>32</td>
+</tr>
+<tr>
+  <td>模型维度 $d_{\text{model}}$</td>
+  <td>4,096</td>
+</tr>
+<tr>
+  <td>Query heads $n_q$</td>
+  <td>32</td>
+</tr>
+<tr>
+  <td>KV heads $n_{kv}$</td>
+  <td>8</td>
+</tr>
+<tr>
+  <td>每头维度 $d_{\text{head}}$</td>
+  <td>128（= 4096 ÷ 32）</td>
+</tr>
+<tr>
+  <td>GQA 分组比例</td>
+  <td>每 4 个 Query head 共享 1 组 KV</td>
+</tr>
+<tr>
+  <td>SwiGLU 中间维度</td>
+  <td>14,336</td>
+</tr>
+<tr>
+  <td>位置编码</td>
+  <td>RoPE，$\theta = 500{,}000$</td>
+</tr>
+<tr>
+  <td>Norm 方式</td>
+  <td>Pre-RMSNorm</td>
+</tr>
+<tr>
+  <td>权重精度</td>
+  <td>BF16</td>
+</tr>
+<tr>
+  <td>Embedding / LM Head</td>
+  <td>不共享权重</td>
+</tr>
 </tbody>
 </table>
-
 <hr />
-
 <h2 id="sec2">二、从 GPT-3 到 LLaMA-3：四个关键设计改变</h2>
 <p>在看具体计算之前，先弄清楚 LLaMA-3 和 GPT-3 的核心区别在哪里。</p>
 <table>
-<thead><tr><th>组件</th><th>GPT-3（旧设计）</th><th>LLaMA-3 8B（新设计）</th><th>改变的动机</th></tr></thead>
+<thead>
+<tr>
+  <th>组件</th>
+  <th>GPT-3（旧设计）</th>
+  <th>LLaMA-3 8B（新设计）</th>
+  <th>改变的动机</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>归一化</td><td>Pre-LayerNorm</td><td>Pre-RMSNorm</td><td>RMSNorm 省去均值计算，速度更快，效果持平</td></tr>
-<tr><td>注意力头</td><td>MHA（96Q / 96KV）</td><td>GQA（32Q / 8KV）</td><td>KV Cache 显存降为 1/4</td></tr>
-<tr><td>位置编码</td><td>绝对位置 Embedding（加法）</td><td>RoPE（旋转乘法）</td><td>天然表达相对位置，长上下文外推更好</td></tr>
-<tr><td>FFN 激活</td><td>GELU（两次矩阵乘法）</td><td>SwiGLU（三次矩阵乘法，加门控）</td><td>FFN 表达力更强</td></tr>
+<tr>
+  <td>归一化</td>
+  <td>Pre-LayerNorm</td>
+  <td>Pre-RMSNorm</td>
+  <td>RMSNorm 省去均值计算，理论上更简单，实验中通常能保持相近质量（不是对所有规模、任务都成立的定律）</td>
+</tr>
+<tr>
+  <td>注意力头</td>
+  <td>MHA（96Q / 96KV）</td>
+  <td>GQA（32Q / 8KV）</td>
+  <td>相比&quot;同宽度假想 MHA 版本&quot;（32Q/32KV），KV Cache 显存降为 1/4（不是相对 GPT-3 实际的 96 头/12288 维配置）</td>
+</tr>
+<tr>
+  <td>位置编码</td>
+  <td>绝对位置 Embedding（加法）</td>
+  <td>RoPE（旋转乘法）</td>
+  <td>天然表达相对位置，长上下文外推更好</td>
+</tr>
+<tr>
+  <td>FFN 激活</td>
+  <td>GELU（两次矩阵乘法）</td>
+  <td>SwiGLU（三次矩阵乘法，加门控）</td>
+  <td>FFN 表达力更强</td>
+</tr>
 </tbody>
 </table>
 <p>这四个改变是 2021～2024 年间大语言模型研究积累的工程经验，每一个都有具体的数值意义，下面逐步展开。</p>
-
 <hr />
-
-<h2 id="sec3">三、完整前向传播：用具体数值走一遍</h2>
-
+<h2 id="sec3">三、前向传播：完整流程 + 部分示意数值走一遍</h2>
+<blockquote>
+<p>说明：下面完整展示的是前向传播的<strong>结构和张量形状</strong>；数值部分里 Softmax 归一化可以按给定输入完整复算，但 Q/K 点积（score）用的是直接给定的假设值，不能仅凭文中展示的截断向量反推出来（见下文 Step 1 的说明）——这是一份&quot;结构完整、数值部分示意&quot;的演示，不是端到端可逐位验证的完整数值前向传播。</p>
+</blockquote>
 <div class="diagram-wrap">
   <img src="llm%20diagram.png" alt="LLM Transformer 架构总览" />
-  <div class="diagram-caption">
-    Transformer 解码器架构总览：Input → Tokenization → Embedding →
-    [LayerNorm + Attention heads + 残差 + LayerNorm + MLP + 残差] × L →
-    LayerNorm → Unembed → Logits → Softmax → 下一个 token 概率分布
-  </div>
+  <div class="diagram-caption">Transformer 解码器架构总览</div>
 </div>
-
-<blockquote><p>先追踪 <strong>1 个 token</strong>，感受张量形状；最后乘以批量感受总规模。</p></blockquote>
-
+<blockquote>
+<p>先追踪 <strong>1 个 token</strong>，感受张量形状；最后乘以批量感受总规模。</p>
+</blockquote>
 <h3>第一步：Embedding 查表</h3>
 <p>词表矩阵的形状：</p>
-$$E \text{ 的形状} = [128256,\ 4096] \quad \text{参数量} = 128256 \times 4096 = \textbf{5.25 亿}$$
-<p>假设句子 "猫追鱼"，分词后得到 3 个 token（实际 tokenizer 可能不同，此处为示意）：</p>
-$$x_1 = \text{猫},\quad x_2 = \text{追},\quad x_3 = \text{鱼}$$
-<p>取出 "猫" 对应的行：</p>
-$$x_\text{猫} \text{ 的形状} = [1,\ 4096]$$
+<p>$$E \text{ 的形状} = [128256,\ 4096] \quad \text{参数量} = 128256 \times 4096 = \textbf{5.25 亿}$$</p>
+<p>假设句子 &quot;猫追鱼&quot;，分词后得到 3 个 token（实际 tokenizer 可能不同，此处为示意）：</p>
+<p>$$x_1 = \text{猫},\quad x_2 = \text{追},\quad x_3 = \text{鱼}$$</p>
+<p>取出 &quot;猫&quot; 对应的行：</p>
+<p>$$x_\text{猫} \text{ 的形状} = [1,\ 4096]$$</p>
 <p><strong>重要：LLaMA-3 不在 Embedding 层加位置信息。</strong></p>
 <p>GPT-3 会在这一步把位置 Embedding 叠加到词 Embedding 上（$x_0 = \text{Emb} + \text{PosEmb}$）。LLaMA-3 没有独立的位置 Embedding 表，位置信息通过后面的 RoPE 旋转进 Q 和 K，不改变这里的 $x_\text{猫}$。</p>
-
 <hr />
-
 <h3>第二步：Pre-RMSNorm</h3>
 <p>形状不变：$[1,\ 4096] \rightarrow [1,\ 4096]$</p>
 <p>LLaMA-3 在每个 Block 的注意力和 FFN <strong>之前</strong>各做一次 RMSNorm（Pre-Norm）。GPT-3 同样使用 Pre-Norm 顺序（Pre-LayerNorm），区别在于 LLaMA-3 把 LayerNorm 换成了计算更轻量的 RMSNorm。</p>
-
 <hr />
-
-<div class="tip-box">
-<div class="tip-title">小知识点：为什么用 Pre-Norm 而不是 Post-Norm？</div>
+<p><strong>小知识点：为什么用 Pre-Norm 而不是 Post-Norm？</strong></p>
 <p>Post-Norm 在残差连接<strong>之后</strong>才归一化：</p>
-$$y = \text{Norm}(x + F(x))$$
-<p>问题是：$x + F(x)$ 这一步直接把两个向量相加，当网络很深时，梯度会在大量层的残差路径上累积，导致训练不稳定（exploding/vanishing gradients）。</p>
+<p>$$y = \text{Norm}(x + F(x))$$</p>
 <p>Pre-Norm 在进入 $F$ 之前先归一化：</p>
-$$y = x + F(\text{Norm}(x))$$
-<p>残差路径 $x$ 直接连通到输出，梯度可以无阻碍地通过残差跳过所有层，训练深层模型更稳定。代价是归一化的正则化效果略弱一些，但工程上训练稳定性更重要。</p>
-<div class="oneliner"><strong>一句话</strong>：Pre-Norm 让梯度有一条"高速公路"（残差路径）直达输入，深层训练不容易崩。</div>
-</div>
-
+<p>$$y = x + F(\text{Norm}(x))$$</p>
+<p>两者都有 $x+(\cdot)$ 这个残差相加的形式，<strong>区别不在于&quot;是否直接相加两个向量&quot;，而在于 Norm 的雅可比矩阵是否包住了恒等分支</strong>：</p>
+<ul>
+<li>Pre-Norm 的雅可比是 $\dfrac{\partial y}{\partial x}=I+\dfrac{\partial F}{\partial\text{Norm}(x)}\dfrac{\partial\text{Norm}(x)}{\partial x}$——恒等项 $I$ 独立存在，不经过 Norm 的雅可比，残差路径提供了一条传递系数恒为 1 的直接梯度通道。</li>
+<li>Post-Norm 的雅可比是 $\dfrac{\partial y}{\partial x}=J_\text{Norm}\cdot\left(I+\dfrac{\partial F}{\partial x}\right)$——$\text{Norm}$ 的雅可比 $J_\text{Norm}$ 乘在<strong>整个</strong>括号外面，恒等分支也逃不出这次归一化的缩放/耦合，深层网络里 $J_\text{Norm}$ 逐层连乘，不再有一条&quot;绕开 Norm&quot;的恒等路径，这是 Post-Norm 深层训练更容易不稳定（exploding/vanishing gradients）的<strong>一个主要机制</strong>——但深层训练的稳定性还受初始化方式、残差分支的数值尺度、学习率、优化器选择等多个因素共同影响，这里说的是&quot;主要机制之一&quot;，不是唯一原因。</li>
+</ul>
+<p><strong>需要注意</strong>：即便是 Pre-Norm，总梯度也是恒等分支和变换分支两部分之<strong>和</strong>，这条直接通道保证的是&quot;存在一条不衰减的路径&quot;，不是&quot;梯度绝对无阻碍、训练必然稳定&quot;这种数学保证——如果变换分支传回的梯度和恒等分支方向相反，两者仍可能相互抵消。Pre-Norm 的代价是归一化的正则化效果略弱一些，但工程上训练稳定性通常更重要。</p>
+<p><strong>一句话</strong>：Pre-Norm 让梯度有一条&quot;高速公路&quot;（残差路径）直达输入，深层训练不容易崩。</p>
 <blockquote>
 <p><strong>LLaMA-3 vs GPT-3 归一化的真正区别</strong>：两者都用 Pre-Norm 顺序（先 Norm，再做注意力/FFN），区别不在于 Pre vs Post，而在于 Norm 的类型——GPT-3 用 LayerNorm（含均值计算），LLaMA-3 用 RMSNorm（去掉均值，只保留 RMS 缩放）。</p>
 </blockquote>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：RMSNorm 和 LayerNorm 到底差在哪里？</div>
+<hr />
+<p><strong>小知识点：RMSNorm 和 LayerNorm 到底差在哪里？</strong></p>
 <p>LayerNorm 需要：</p>
 <ol>
 <li>计算均值 $\mu = \frac{1}{d}\sum_i x_i$</li>
@@ -354,156 +433,228 @@ $$y = x + F(\text{Norm}(x))$$
 <li>缩放和平移：$y_i = \gamma_i \hat{x}_i + \beta_i$</li>
 </ol>
 <p>RMSNorm 省掉了均值计算和平移参数 $\beta$：</p>
-$$\text{RMS}(x) = \sqrt{\frac{1}{d}\sum_{i=1}^{d} x_i^2 + \epsilon}$$
-$$y_i = \frac{x_i}{\text{RMS}(x)} \cdot w_i$$
+<p>$$\text{RMS}(x) = \sqrt{\frac{1}{d}\sum_{i=1}^{d} x_i^2 + \epsilon}$$</p>
+<p>$$y_i = \frac{x_i}{\text{RMS}(x)} \cdot w_i$$</p>
 <p>其中 $d = 4096$，$w$ 是可训练缩放参数，形状 $[4096]$。</p>
-<p>实验发现去掉"减均值"这一步后质量下降极少，但计算量明显减少——均值需要两遍扫描（先算均值再算方差），RMS 只需一遍。</p>
-<div class="oneliner"><strong>一句话</strong>：RMSNorm = LayerNorm 去掉了"减均值"和"加偏置"，只保留"按均方根缩放"，更快，质量基本持平。</div>
-</div>
-
+<p>RMSNorm 原论文（Zhang &amp; Sennrich, 2019）等实验发现，去掉&quot;减均值&quot;这一步后模型质量下降极少，同时 RMSNorm 需要的统计量更少（只需要 $\sum x_i^2$，不需要先算均值再算方差），理论上计算和访存都更简单。<strong>需要说明</strong>：具体能省多少、是&quot;一遍扫描&quot;还是&quot;两遍扫描&quot;，实际取决于 kernel 实现——LayerNorm 完全可以用单遍融合 kernel（比如同时累计 $\sum x$ 和 $\sum x^2$，或用 Welford 算法）算出均值和方差，不一定要分两遍读数据；更稳妥的说法是&quot;RMSNorm 需要的统计量更少、理论上更简单&quot;，不是所有实现都固定是&quot;一遍对两遍&quot;这么绝对的差距。</p>
+<p><strong>一句话</strong>：RMSNorm = LayerNorm 去掉了&quot;减均值&quot;和&quot;加偏置&quot;，只保留&quot;按均方根缩放&quot;，理论上更简单；实验中通常能保持相近质量，但这是工程经验趋势，不是对所有规模、训练设置和任务都成立的定律。</p>
 <hr />
-
-<h3>第三步：GQA 注意力——四次矩阵乘法</h3>
+<h3>第三步：GQA 注意力——四次权重投影（完整 attention 另外还有 $QK^\top$、$\alpha V$ 两次矩阵乘法）</h3>
 <p>GQA（Grouped Query Attention，分组查询注意力）是 LLaMA-3 相较于 GPT-3 在注意力层最大的结构差异。</p>
-
 <h4>生成 Q、K、V：形状不对称</h4>
 <p><strong>Q 投影（32 个 Query head）：</strong></p>
-$$Q = x \cdot W_Q \quad [1,\ 4096] \times [4096,\ 4096] \rightarrow [1,\ 4096]$$
+<p>$$Q = x \cdot W_Q \quad [1,\ 4096] \times [4096,\ 4096] \rightarrow [1,\ 4096]$$</p>
 <p>切分为 32 个 Query head，每头 128 维：</p>
-$$[1,\ 4096] \rightarrow 32 \text{ 个头，每头} [1,\ 128]$$
+<p>$$[1,\ 4096] \rightarrow 32 \text{ 个头，每头} [1,\ 128]$$</p>
 <p><strong>K 投影（只有 8 个 KV head）：</strong></p>
-$$K = x \cdot W_K \quad [1,\ 4096] \times [4096,\ 1024] \rightarrow [1,\ 1024]$$
+<p>$$K = x \cdot W_K \quad [1,\ 4096] \times [4096,\ 1024] \rightarrow [1,\ 1024]$$</p>
 <p>切分为 8 个 KV head，每头 128 维：</p>
-$$[1,\ 1024] \rightarrow 8 \text{ 个头，每头} [1,\ 128]$$
+<p>$$[1,\ 1024] \rightarrow 8 \text{ 个头，每头} [1,\ 128]$$</p>
 <p><strong>V 投影（同样 8 个 KV head）：</strong></p>
-$$V = x \cdot W_V \quad [1,\ 4096] \times [4096,\ 1024] \rightarrow [1,\ 1024]$$
-$$[1,\ 1024] \rightarrow 8 \text{ 个头，每头} [1,\ 128]$$
+<p>$$V = x \cdot W_V \quad [1,\ 4096] \times [4096,\ 1024] \rightarrow [1,\ 1024]$$</p>
+<p>$$[1,\ 1024] \rightarrow 8 \text{ 个头，每头} [1,\ 128]$$</p>
 <p><strong>形状一览：</strong></p>
 <table>
-<thead><tr><th>矩阵</th><th>$W$ 形状</th><th>参数量</th><th>输出维度</th></tr></thead>
+<thead>
+<tr>
+  <th>矩阵</th>
+  <th>$W$ 形状</th>
+  <th>参数量</th>
+  <th>输出维度</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>$W_Q$</td><td>$[4096,\ 4096]$</td><td>1677 万</td><td>$[1,\ 4096]$</td></tr>
-<tr><td>$W_K$</td><td>$[4096,\ 1024]$</td><td>419 万</td><td>$[1,\ 1024]$</td></tr>
-<tr><td>$W_V$</td><td>$[4096,\ 1024]$</td><td>419 万</td><td>$[1,\ 1024]$</td></tr>
-<tr><td>$W_O$</td><td>$[4096,\ 4096]$</td><td>1677 万</td><td>$[1,\ 4096]$</td></tr>
+<tr>
+  <td>$W_Q$</td>
+  <td>$[4096,\ 4096]$</td>
+  <td>1677 万</td>
+  <td>$[1,\ 4096]$</td>
+</tr>
+<tr>
+  <td>$W_K$</td>
+  <td>$[4096,\ 1024]$</td>
+  <td>419 万</td>
+  <td>$[1,\ 1024]$</td>
+</tr>
+<tr>
+  <td>$W_V$</td>
+  <td>$[4096,\ 1024]$</td>
+  <td>419 万</td>
+  <td>$[1,\ 1024]$</td>
+</tr>
+<tr>
+  <td>$W_O$</td>
+  <td>$[4096,\ 4096]$</td>
+  <td>1677 万</td>
+  <td>$[1,\ 4096]$</td>
+</tr>
 </tbody>
 </table>
-
 <hr />
-
-<div class="tip-box">
-<div class="tip-title">小知识点：什么是 GQA？它和 MHA、MQA 有什么区别？</div>
+<p><strong>小知识点：什么是 GQA？它和 MHA、MQA 有什么区别？</strong></p>
 <p>注意力头数量的三种设计：</p>
 <table>
-<thead><tr><th>类型</th><th>Q heads</th><th>K/V heads</th><th>代表模型</th><th>KV Cache</th></tr></thead>
+<thead>
+<tr>
+  <th>类型</th>
+  <th>Q heads</th>
+  <th>K/V heads</th>
+  <th>代表模型</th>
+  <th>KV Cache</th>
+</tr>
+</thead>
 <tbody>
-<tr><td><strong>MHA</strong>（多头注意力）</td><td>$h$</td><td>$h$</td><td>GPT-3、BERT</td><td>最大</td></tr>
-<tr><td><strong>MQA</strong>（多查询注意力）</td><td>$h$</td><td>1</td><td>PaLM</td><td>最小，质量有损</td></tr>
-<tr><td><strong>GQA</strong>（分组查询注意力）</td><td>$h$</td><td>$g$（$1 &lt; g &lt; h$）</td><td>LLaMA-3、Gemma</td><td>MHA 的 $g/h$</td></tr>
+<tr>
+  <td><strong>MHA</strong>（多头注意力）</td>
+  <td>$h$</td>
+  <td>$h$</td>
+  <td>GPT-3、BERT</td>
+  <td>最大</td>
+</tr>
+<tr>
+  <td><strong>MQA</strong>（多查询注意力）</td>
+  <td>$h$</td>
+  <td>1</td>
+  <td>PaLM</td>
+  <td>最小，某些设置下质量可能下降</td>
+</tr>
+<tr>
+  <td><strong>GQA</strong>（分组查询注意力）</td>
+  <td>$h$</td>
+  <td>$g$（$1 < g < h$）</td>
+  <td>LLaMA-3、Gemma</td>
+  <td>MHA 的 $g/h$</td>
+</tr>
 </tbody>
 </table>
-<p>MHA 每个 Q head 有独立的 K 和 V，效果最好，但推理时 KV Cache 最大。</p>
-<p>MQA 把所有 Q head 的 K、V 合并成 1 组，KV Cache 最小，但 K/V 表达力下降，模型质量有所损失。</p>
+<p>MHA 每个 Q head 有独立的 K 和 V，KV 表达力通常最强，但推理时 KV Cache 最大。</p>
+<p>MQA 把所有 Q head 的 K、V 合并成 1 组，KV Cache 最小，但 K/V 表达力下降，一些实验设置下模型质量会受影响——具体影响程度依赖模型规模和任务，不是所有情况下都成立的定律。</p>
 <p>GQA 是中间方案：把 $h$ 个 Q head 分成 $g$ 组，每组共享一对 K/V head。LLaMA-3 8B 的分组是 32Q / 8KV，每 4 个 Q head 共享 1 个 KV head：</p>
 <pre><code>Q head 0, 1, 2, 3    → 共用 KV head 0
 Q head 4, 5, 6, 7    → 共用 KV head 1
 ...
-Q head 28, 29, 30, 31 → 共用 KV head 7</code></pre>
-<p>共享的是<strong>投影矩阵</strong>（$W_K, W_V$）产生的 K/V 数据，而不是 Q 向量或 attention 权重——同组 Q head 各自有独立的查询方向，只是从同一份 K/V 里"查资料"。</p>
-</div>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：4:1 的分组比例是怎么来的？</div>
-<p>这不是数学推导的最优解，而是通过消融实验选出的工程经验值。</p>
-<p>Ainslie 等人 2023 年的 GQA 论文发现：当每组包含 4 个 Q head 时，模型质量已经非常接近完整 MHA，但 KV Cache 降为 MHA 的 1/4。继续增大分组（比如 8:1、16:1）质量开始明显下降，而减小分组（2:1）收益有限。</p>
-<p>LLaMA-3 8B 在 $d_\text{model} = 4096$、$n_q = 32$ 的前提下选了 $n_{kv} = 8$（分组比 4:1），是效果与效率的实用平衡点。</p>
-<div class="oneliner"><strong>一句话</strong>：4:1 是"实验发现质量几乎不掉，但 KV Cache 缩小 4 倍"的经验数字，不是公式推出来的。</div>
-</div>
-
-<div class="warning-box">
-<div class="warning-title">容易犯的错误：4 个 token 和 4 个 Query head 是两个完全不同的维度</div>
-<p>假设输入是 "猫追鱼"（3 个 token）。</p>
+Q head 28, 29, 30, 31 → 共用 KV head 7
+</code></pre>
+<p>更准确地说：模型只有<strong>一个</strong>整体的 $W_K$ 和<strong>一个</strong>整体的 $W_V$，各自一次性输出全部 8 个 KV head 的结果；每组 4 个 Query head 复用的是其中<strong>同一个 KV head 的输出</strong>，而不是&quot;各自持有一份、又恰好共享&quot;的投影矩阵——共享的是 KV head 生成之后的<strong>结果</strong>，不是 Q 向量或 attention 权重，同组 Q head 各自有独立的查询方向，只是从同一份 K/V 结果里&quot;查资料&quot;。</p>
+<hr />
+<p><strong>小知识点：4:1 的分组比例是怎么来的？</strong></p>
+<p>这不是数学推导的最优解，而是 Meta 针对 LLaMA-3 8B 做出的一个具体架构选择。</p>
+<p>Ainslie 等人 2023 年的 GQA 论文表明：GQA 作为 MHA 和 MQA 之间的折中方案，可以在接近 MHA 质量的同时取得接近 MQA 的推理效率。但<strong>该论文并没有建立&quot;4:1 是所有模型的普适最优分组比例&quot;这样的通用规律</strong>——具体多大的分组比例效果最好，取决于模型规模、训练方式和下游任务，论文本身也是在特定实验设置下做的消融，不能直接套用到任意模型上。</p>
+<p>LLaMA-3 8B 在 $d_\text{model} = 4096$、$n_q = 32$ 的前提下选了 $n_{kv} = 8$（分组比 4:1），这是 Meta 针对这个具体模型做出的架构选择，效果与效率上是一个合理的平衡点；但&quot;为什么恰好是 4:1&quot;更适合理解为&quot;Meta 的工程选择&quot;，而不是 GQA 论文已经证明过的通用最优比例。</p>
+<p><strong>一句话</strong>：LLaMA-3 8B 选择 4:1 分组是事实；&quot;4:1 普遍是质量几乎不掉的最优比例&quot;是一个未经普适验证的推广，不能当作定律引用。</p>
+<hr />
+<p><strong>容易犯的错误：4 个 token 和 4 个 Query head 是两个完全不同的维度</strong></p>
+<p>假设输入是 &quot;猫追鱼&quot;（3 个 token）。</p>
 <ul>
-<li><strong>"每 4 个 Q head 共享 1 个 KV head"</strong> 里的"4"是头的编号，描述注意力头的分组结构，和序列长度（3 个 token）<strong>没有关系</strong>。</li>
+<li><strong>&quot;每 4 个 Q head 共享 1 个 KV head&quot;</strong> 里的&quot;4&quot;是头的编号，描述注意力头的分组结构，和序列长度（3 个 token）<strong>没有关系</strong>。</li>
 <li>3 个 token 是<strong>序列维度</strong>：每个 KV head 在每个 token 位置都有一个独立的 K/V 向量。</li>
 </ul>
 <p>展开来看，KV head 0 的数据是这样的：</p>
 <pre><code>KV head 0：
   位置 1（猫）：k₁,₀ = [1.0, 0.5, ...]   v₁,₀ = [0.3, -0.1, ...]   ← 128 个数
   位置 2（追）：k₂,₀ = [0.6, -0.2, ...]  v₂,₀ = [0.1,  0.8, ...]
-  位置 3（鱼）：k₃,₀ = [0.2,  0.4, ...]  v₃,₀ = [0.6,  0.2, ...]</code></pre>
+  位置 3（鱼）：k₃,₀ = [0.2,  0.4, ...]  v₃,₀ = [0.6,  0.2, ...]
+</code></pre>
 <p>Q head 0、1、2、3 共享的是上面这整组数据，但各自用自己的 Q 向量与这些 K 做点积，得到各自独立的 attention 权重和输出。</p>
-<p>"共享 KV"不等于"共享一个向量"——每个序列位置的 K/V 是不同的，共享的是投影矩阵（也就是生成这些 K/V 所用的 $W_K, W_V$）。</p>
-</div>
-
+<p>&quot;共享 KV&quot;不等于&quot;共享一个向量&quot;——每个序列位置的 K/V 是不同的，共享的是同一个 KV head 的输出结果（这份结果由模型整体唯一的 $W_K,W_V$ 生成，不是每个 Query head 各自拥有一份再共享）。</p>
+<hr />
 <h4>RoPE：把位置旋转进 Q 和 K</h4>
 <p>RoPE 只作用在 Q 和 K 上，V 不旋转，形状不变：</p>
-$$Q:[1,\ 32,\ 128] \rightarrow Q_{\text{rope}}:[1,\ 32,\ 128]$$
-$$K:[1,\ 8,\ 128] \rightarrow K_{\text{rope}}:[1,\ 8,\ 128]$$
+<p>$$Q:[1,\ 32,\ 128] \rightarrow Q_{\text{rope}}:[1,\ 32,\ 128]$$
+$$K:[1,\ 8,\ 128] \rightarrow K_{\text{rope}}:[1,\ 8,\ 128]$$</p>
 <p>具体做法：把每个 head 的 128 维向量按两两一组拆成 64 个平面：</p>
-$$(x_0,\ x_1),\ (x_2,\ x_3),\ \ldots,\ (x_{126},\ x_{127})$$
+<p>$$(x_0,\ x_1),\ (x_2,\ x_3),\ \ldots,\ (x_{126},\ x_{127})$$</p>
 <p>在位置 $p$，第 $i$ 个平面旋转角度 $\theta_{p,i} = p \cdot \theta_{\text{base}}^{-2i/d_\text{head}}$：</p>
-$$\begin{bmatrix} x'_{2i} \\ x'_{2i+1} \end{bmatrix} = \begin{bmatrix} \cos\theta_{p,i} & -\sin\theta_{p,i} \\ \sin\theta_{p,i} & \cos\theta_{p,i} \end{bmatrix} \begin{bmatrix} x_{2i} \\ x_{2i+1} \end{bmatrix}$$
-
-<div class="tip-box">
-<div class="tip-title">小知识点：为什么旋转操作能表达"相对位置"？</div>
+<p>$$\begin{bmatrix} x'_{2i} \\ x'_{2i+1} \end{bmatrix} = \begin{bmatrix} \cos\theta_{p,i} & -\sin\theta_{p,i} \\ \sin\theta_{p,i} & \cos\theta_{p,i} \end{bmatrix} \begin{bmatrix} x_{2i} \\ x_{2i+1} \end{bmatrix}$$</p>
+<hr />
+<p><strong>小知识点：为什么旋转操作能表达&quot;相对位置&quot;？</strong></p>
 <p>核心数学事实：两个经过旋转的向量的点积，只与它们旋转角之<strong>差</strong>有关，与各自的绝对位置无关。</p>
 <p>设 query 在位置 $p$，key 在位置 $s$，旋转矩阵分别是 $R_p$ 和 $R_s$：</p>
-$$(R_p q)^\top (R_s k) = q^\top R_p^\top R_s k = q^\top R_{s-p} k$$
+<p>$$(R_p q)^\top (R_s k) = q^\top R_p^\top R_s k = q^\top R_{s-p} k$$</p>
 <p>最终只剩 $R_{s-p}$，即 $s-p$（相对距离）。注意力得分自动包含位置差信息，不依赖 $p$ 或 $s$ 本身。</p>
-<p><strong>直观理解</strong>：把两个 token 的位置想象成时钟表盘上的两根指针。无论把整个表盘顺时针转多少度，两根指针的<strong>夹角</strong>不变。RoPE 让 Q 和 K 的点积只感知两者的"夹角差"（相对位置），感知不到各自的"绝对角度"（绝对位置）。</p>
-<p>传统绝对位置 Embedding（如 GPT-3）把位置向量加到 token 向量上，位置信息是"叠加"进去的；RoPE 是"旋转"进去的，两者的本质区别在这里。</p>
-</div>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：$\theta_\text{base} = 500{,}000$ 是什么意思？为什么这么大？</div>
-<p>$\theta_\text{base}$ 控制旋转频率。对第 $i$ 个维度对，旋转速率是 $\theta_\text{base}^{-2i/d}$：</p>
+<p><strong>直观理解</strong>：把两个 token 的位置想象成时钟表盘上的两根指针。无论把整个表盘顺时针转多少度，两根指针的<strong>夹角</strong>不变。RoPE 在 Q/K 点积这一步<strong>显式引入的是相对位移</strong>（夹角差），而不是一个独立的绝对位置向量——这不等于说整个模型完全&quot;感知不到绝对位置&quot;：模型仍然可能通过因果掩码边界、序列开头/结尾等上下文线索、每个位置能看到的 token 数量等其他途径，间接获得和绝对位置相关的信息。更准确的说法是&quot;RoPE 这一步注入的是相对位移，不是绝对位置&quot;，而不是笼统地说&quot;整个模型感知不到绝对位置&quot;。</p>
+<p>传统绝对位置 Embedding（如 GPT-3）把位置向量加到 token 向量上，位置信息是&quot;叠加&quot;进去的；RoPE 是&quot;旋转&quot;进去的，两者的本质区别在这里。</p>
+<hr />
+<p><strong>小知识点：$\theta_\text{base} = 500{,}000$ 是什么意思？为什么这么大？</strong></p>
+<p>$\theta_\text{base}$ 控制旋转频率。对第 $i$ 个维度对，旋转速率是 $\theta_\text{base}^{-2i/d}$（这里 $i=0,1,\dots,63$）：</p>
 <ul>
-<li>$\theta_\text{base}$ 越大，旋转越慢</li>
-<li>$\theta_\text{base}$ 越小，旋转越快</li>
+<li>对 $i>0$ 的维度对：$\theta_\text{base}$ 越大，旋转越慢；$\theta_\text{base}$ 越小，旋转越快</li>
+<li>$i=0$ 是特例：旋转速率恒为 $\theta_\text{base}^0=1$，与 $\theta_\text{base}$ 取值无关——&quot;base 越大旋转越慢&quot;这条规律不适用于 $i=0$ 这个维度对</li>
 </ul>
-<p>原始 RoPE 论文（Su et al., 2021）针对 512 上下文用的是 $\theta_\text{base} = 10{,}000$。LLaMA-3 的上下文是 8,192——是 512 的 16 倍。</p>
-<p>如果继续用 10,000，高频维度到第 8192 个位置时已经绕了很多整圈，不同位置会产生相同或接近的旋转角，失去区分度（位置混叠）。</p>
-<p>把 $\theta_\text{base}$ 从 10,000 提升到 500,000，相当于把旋转放慢 50 倍，让每个维度在 8192 步内不会绕完整圈，保持位置的唯一性。</p>
-<div class="oneliner"><strong>一句话</strong>：$\theta_\text{base} = 500{,}000$ 是为了支持 8K 上下文而把旋转速度放慢 50 倍，防止远端 token 的旋转角发生周期性混叠。</div>
-</div>
-
-<h4>计算注意力得分（以"鱼"看全句为例）</h4>
-<p>以 "鱼"（位置 3）为例，Q head 0 使用 KV head 0 的数据。</p>
-<p><strong>Step 1：Q、K 的值（已应用 RoPE，旋转角不同的两个 token 点积自然包含相对距离）</strong></p>
-$$q_3 = x_\text{鱼} \cdot W_{Q,\text{head0}} \quad [1,\ 128]$$
-$$k_1 = x_\text{猫} \cdot W_{K,\text{KV0}} = [0.4,\ 0.7,\ 0.1,\ \ldots] \quad \text{（"猫"，128个数）}$$
-$$k_2 = x_\text{追} \cdot W_{K,\text{KV0}} = [0.6,\ 0.3,\ -0.2,\ \ldots] \quad \text{（"追"，128个数）}$$
-$$k_3 = x_\text{鱼}  \cdot W_{K,\text{KV0}} = [0.2,\ 0.5,\ 0.4,\ \ldots] \quad \text{（"鱼"自己，128个数）}$$
+<p>原始 RoPE 论文（Su et al., 2021）针对 512 上下文用的是 $\theta_\text{base} = 10{,}000$——这是论文的<strong>实验配置选择</strong>，不是从 512 这个数字用某种公式数学推导出来的。LLaMA-3 的上下文是 8,192——是 512 的 16 倍。</p>
+<p>用 $\theta_\text{base}=10{,}000$ 时，第 $i$ 个维度对的周期是 $2\pi\times10{,}000^{2i/128}$；分别令周期等于 512 和 8192 可以解出：周期 $=512$ 时 $i\approx30.6$，周期 $=8192$ 时 $i\approx49.8$。也就是说，在原始 512 上下文的设计里，$i\gtrsim31$ 的维度对周期已经长于 512，训练时这些维度对不会绕完一整圈。但如果直接把同一个 $\theta_\text{base}=10{,}000$ 套用到 LLaMA-3 的 8192 上下文，$i\approx31$ 到 $i\approx49$ 之间的维度对周期短于 8192，就会在新的更长上下文里<strong>多绕一整圈以上</strong>。</p>
+<p><strong>把 $\theta_\text{base}$ 提升到 500,000 后，&quot;不再绕圈&quot;的边界会往回移，但不是所有原先绕圈的维度都能跨过这道边界</strong>：同样令周期 $=8192$，用 $\theta_\text{base}=500{,}000$ 解出的边界是 $i\approx35.0$（不是 $i\approx49.8$ 那道旧边界）。也就是说，只有 $i\approx35$ 到 $i\approx49$ 这个子区间，才真正从&quot;在 8192 步内绕圈&quot;变成&quot;不绕圈&quot;；而 $i=31,32,33,34$ 这几个维度对，即使把 base 提到 500,000，周期也只是从几百步拉长到几千步（比如 $i=31$ 从约 544 步拉长到约 3,619 步，$i=34$ 从约 838 步拉长到约 6,695 步），仍然<strong>短于</strong> 8192，依然会在 8192 步内绕完一整圈——只是绕的圈数变少了，不是彻底消除了绕圈。所以更准确的表述是：&quot;提升 base 让 $i\approx35$ 到 $i\approx49$ 这部分维度从绕圈变为不绕圈；$i\approx31$ 到 $34$ 的维度周期同样被拉长，但仍然没有跨过 8192 这道门槛&quot;，不能笼统地说&quot;$i\approx31$ 到 $50$ 的维度都不再绕完整圈&quot;。</p>
+<p><strong>需要说明几点，避免推论过强</strong>：</p>
+<ul>
+<li>这里说的&quot;绕圈&quot;&quot;重复&quot;，指的是<strong>单个频率分量</strong>（某一个 $i$ 对应的二维平面）自身的周期性。RoPE 的位置信息由 <strong>64 个不同频率的维度对联合编码</strong>，某一个分量绕了一整圈、单独看会重复，不代表整个 128 维的位置旋转状态发生了混叠——其他周期不同的分量仍然可能区分这两个位置（类似钟表的时针、分针、秒针，秒针每 60 秒重复一次，但三根指针联合起来长时间内基本不重复）。所以更准确的说法是&quot;部分频率分量的周期性变得不够理想&quot;，不能不加限定地说成&quot;整个 RoPE 编码发生了混叠&quot;。</li>
+<li>把 $\theta_\text{base}$ 从 10,000 提升到 500,000，效果是让中低频维度对的周期变长；但<strong>放慢倍数本身按 $50^{i/64}$ 逐维度变化，从 1 倍到约 47 倍不等，不是所有维度&quot;等比例&quot;放大</strong>——只能说整体频谱往更长波长的方向移动了，不是均匀缩放，具体哪些维度从&quot;绕圈&quot;变成&quot;不绕圈&quot;要看上面这道边界的移动范围。</li>
+<li>这里给出的&quot;为什么要用 500,000&quot;是一个<strong>在数学上自洽、合理的机理解释</strong>，不代表这就是 Meta 官方证实的选参过程——除非有第一方资料明确说明，否则这仍然是本文的推断，不是已验证的设计记录。</li>
+</ul>
+<p><strong>这里再纠正一个常见的误解：放慢≠&quot;覆盖的角度区间变得更丰富&quot;——对固定的 8192 步上下文而言，同一个维度放慢之后，转过的总角度反而更小了</strong>。放慢倍数依赖维度对编号 $i$：</p>
+<p>$$\frac{\omega_i^{\text{old}}}{\omega_i^{\text{new}}} = \left(\frac{500{,}000}{10{,}000}\right)^{2i/128} = 50^{i/64}$$</p>
+<ul>
+<li>$i=0$（最高频维度对）：放慢倍数 $=50^0=1$，<strong>完全没有变慢</strong>——旋转速率恒为 1 rad/token，与 $\theta_\text{base}$ 无关，在 8192 个位置内会转过 $8192/(2\pi)\approx1304$ 整圈。</li>
+<li>$i=32$（中频）：放慢倍数 $\approx 50^{0.5}\approx7.07$ 倍。</li>
+<li>$i=63$（最低频维度对）：放慢倍数 $\approx 50^{63/64}\approx47.0$ 倍，接近完整的 50 倍。以 $i=63$ 为例，8192 步内累计转过的总角度：$\theta_\text{base}=10{,}000$ 时约 0.946 rad；提升到 500,000 后反而只剩约 0.020 rad——<strong>放慢确实让这个维度在固定的 8192 步内转得更少，不是&quot;覆盖更充分的角度区间&quot;</strong>。这个维度真正的作用不是靠自己转出丰富角度，而是把周期拉长到明显超过 8192，保证在整个上下文范围内都不会绕完一圈，提供一个平滑变化、不重复的&quot;慢速指针&quot;。</li>
+</ul>
+<p><strong>一句话</strong>：$\theta_\text{base} = 500{,}000$ 的一个合理解释是把中频维度对的旋转周期拉长，使其中 $i\approx35$ 到 $i\approx49$ 这部分维度在 8192 步的新上下文里从&quot;绕圈&quot;变为&quot;不绕圈&quot;（$i\approx31$ 到 $34$ 的周期虽然也被拉长，但仍未跨过 8192 这道门槛——这是本文的机理推断，不是已证实的 Meta 官方设计记录）；不是让每个维度&quot;等比例放慢 50 倍&quot;，也不是让旋转角&quot;覆盖更丰富&quot;——对固定上下文长度而言，放慢反而意味着转过的总角度更小；而且&quot;某个分量绕圈&quot;也不等于&quot;整个 RoPE 编码发生混叠&quot;，64 个不同频率的分量是联合起作用的。</p>
+<hr />
+<h4>计算注意力得分（以&quot;鱼&quot;看全句为例）</h4>
+<p>以 &quot;鱼&quot;（位置 3）为例，Q head 0 使用 KV head 0 的数据。</p>
+<p><strong>Step 1：Q、K 的值（下面写的是&quot;线性投影 + RoPE 旋转&quot;两步之后的最终结果——完整应写成 $q_3=R_{p=3}(x_\text{鱼}\cdot W_{Q,\text{head0}})$，先投影再乘旋转矩阵 $R_p$，这里为了简洁只展示旋转后的结果，不代表可以省略旋转这一步）</strong></p>
+<p>$$q_3 = R_{p=3}\big(x_\text{鱼} \cdot W_{Q,\text{head0}}\big) \quad [1,\ 128]$$</p>
+<p>$$k_1 = R_{p=1}\big(x_\text{猫} \cdot W_{K,\text{KV0}}\big) = [0.4,\ 0.7,\ 0.1,\ \ldots] \quad \text{（"猫"，128个数，此处只展示前 3 个分量）}$$</p>
+<p>$$k_2 = R_{p=2}\big(x_\text{追} \cdot W_{K,\text{KV0}}\big) = [0.6,\ 0.3,\ -0.2,\ \ldots] \quad \text{（"追"，128个数，此处只展示前 3 个分量）}$$</p>
+<p>$$k_3 = R_{p=3}\big(x_\text{鱼}  \cdot W_{K,\text{KV0}}\big) = [0.2,\ 0.5,\ 0.4,\ \ldots] \quad \text{（"鱼"自己，128个数，此处只展示前 3 个分量）}$$</p>
+<p><strong>提醒：这是一个假设数值的示意演示，不是可以从头复算的完整数值前向传播</strong>——$q_3,k_1,k_2,k_3$ 各有 128 个分量，这里只写出了前 3 个、用&quot;…&quot;省略了其余分量；下面 Step 2 的 0.029、0.046、0.063 这几个 score 是<strong>直接给定的假设值</strong>，无法仅凭上面展示的 3 个分量反推出来（需要完整 128 维向量才能算出真实点积）。这套演示的价值在于展示&quot;形状怎么变、RoPE 之后 softmax 怎么算、加权求和怎么算&quot;这套流程，不是提供一组可以逐位验证的真实数字。</p>
 <p><strong>Step 2：计算得分（除以 $\sqrt{128} \approx 11.3$）</strong></p>
-$$\text{score}(x_3, x_1) = \frac{q_3 \cdot k_1^\top}{11.3} \approx 0.029$$
-$$\text{score}(x_3, x_2) = \frac{q_3 \cdot k_2^\top}{11.3} \approx 0.046$$
-$$\text{score}(x_3, x_3) = \frac{q_3 \cdot k_3^\top}{11.3} \approx 0.063$$
-<p><strong>Step 3：Softmax 归一化（因果掩码："鱼"在位置 3，可以看 1、2、3，看不到未来）</strong></p>
-$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.328,\ 0.333,\ 0.339]$$
+<p>$$\text{score}(x_3, x_1) = \frac{q_3 \cdot k_1^\top}{11.3} \approx 0.029$$</p>
+<p>$$\text{score}(x_3, x_2) = \frac{q_3 \cdot k_2^\top}{11.3} \approx 0.046$$</p>
+<p>$$\text{score}(x_3, x_3) = \frac{q_3 \cdot k_3^\top}{11.3} \approx 0.063$$</p>
+<p><strong>Step 3：Softmax 归一化（因果掩码：&quot;鱼&quot;在位置 3，可以看 1、2、3，看不到未来）</strong></p>
+<p>$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.328,\ 0.333,\ 0.339]$$</p>
 <p>验算：$e^{0.029} \approx 1.0294,\ e^{0.046} \approx 1.0471,\ e^{0.063} \approx 1.0650$，和 $\approx 3.1415$；各除以和得 $[0.328,\ 0.333,\ 0.339]$，三者之和 $= 1.000$。✓</p>
 <table>
-<thead><tr><th>token</th><th>注意力权重</th><th>解读</th></tr></thead>
+<thead>
+<tr>
+  <th>token</th>
+  <th>注意力权重</th>
+  <th>解读</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>"猫"</td><td>32.8%</td><td>"鱼"对"猫"的关注程度</td></tr>
-<tr><td>"追"</td><td>33.3%</td><td>"鱼"对"追"的关注程度</td></tr>
-<tr><td>"鱼"自己</td><td>33.9%</td><td>"鱼"对自身的关注程度</td></tr>
+<tr>
+  <td>&quot;猫&quot;</td>
+  <td>32.8%</td>
+  <td>&quot;鱼&quot;对&quot;猫&quot;的关注程度</td>
+</tr>
+<tr>
+  <td>&quot;追&quot;</td>
+  <td>33.3%</td>
+  <td>&quot;鱼&quot;对&quot;追&quot;的关注程度</td>
+</tr>
+<tr>
+  <td>&quot;鱼&quot;自己</td>
+  <td>33.9%</td>
+  <td>&quot;鱼&quot;对自身的关注程度</td>
+</tr>
 </tbody>
 </table>
-<p>三者分数差距很小（0.029 / 0.046 / 0.063），Softmax 之后权重也相近，"鱼"对全句各位置关注较为均匀。</p>
+<p>三者分数差距很小（0.029 / 0.046 / 0.063），Softmax 之后权重也相近，&quot;鱼&quot;对全句各位置关注较为均匀。</p>
 <p><strong>Step 4：加权求和，单头输出（公式等同于 GPT-3 的单头 attention）</strong></p>
-$$\text{head}_3 = 0.328 \times v_1 + 0.333 \times v_2 + 0.339 \times v_3$$
+<p>$$\text{head}_3 = 0.328 \times v_1 + 0.333 \times v_2 + 0.339 \times v_3$$</p>
 <p>输出形状：$[1,\ 128]$</p>
 <p><strong>Step 5：32 个 head 拼接</strong></p>
-$$32 \times 128 = 4096 \rightarrow \text{concat} = [1,\ 4096]$$
+<p>$$32 \times 128 = 4096 \rightarrow \text{concat} = [1,\ 4096]$$</p>
 <p><strong>O 投影（第 4 次矩阵乘法）：</strong></p>
-$$[1,\ 4096] \cdot W_O[4096,\ 4096] \rightarrow [1,\ 4096]$$
+<p>$$[1,\ 4096] \cdot W_O[4096,\ 4096] \rightarrow [1,\ 4096]$$</p>
 <p>$W_O$ 的作用：32 个 head 的输出只是简单拼接，$W_O$ 重新混合来自不同 head 的信息，让各 head 的语义真正融合。</p>
-
-<blockquote><p><strong>以下展开对 GQA 多头注意力完整计算流程的说明。</strong></p></blockquote>
-
+<blockquote>
+<p><strong>以下展开对 GQA 多头注意力完整计算流程的说明。</strong></p>
+</blockquote>
+<hr />
 <h4>多头注意力完整流程图（LLaMA-3 8B GQA 版）</h4>
-<pre><code>x₃（"鱼"）[1, 4096]
+<pre><code>x₃（&quot;鱼&quot;）[1, 4096]
        │
    ┌───┴──────────── 32 个 Q head 并行 ────────────────────┐
    │                                                         │
@@ -525,94 +676,159 @@ $$[1,\ 4096] \cdot W_O[4096,\ 4096] \rightarrow [1,\ 4096]$$
                       │
                   × W_O [4096,4096]
                       │
-                  [1, 4096]</code></pre>
-
+                  [1, 4096]
+</code></pre>
+<hr />
 <h4>量纲自检：注意力层</h4>
-<table class="check-table">
-<thead><tr><th>检查项</th><th>计算</th><th>结果</th></tr></thead>
+<table>
+<thead>
+<tr>
+  <th>检查项</th>
+  <th>计算</th>
+  <th>结果</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>$W_Q$ 参数量</td><td>$4096 \times 4096$</td><td>16,777,216 ✓</td></tr>
-<tr><td>$W_K$ 参数量</td><td>$4096 \times 1024$</td><td>4,194,304 ✓</td></tr>
-<tr><td>$W_V$ 参数量</td><td>$4096 \times 1024$</td><td>4,194,304 ✓</td></tr>
-<tr><td>$W_O$ 参数量</td><td>$4096 \times 4096$</td><td>16,777,216 ✓</td></tr>
-<tr><td>Q 切分后每头维度</td><td>$4096 \div 32$</td><td>$128 = d_\text{head}$ ✓</td></tr>
-<tr><td>K/V 切分后每头维度</td><td>$1024 \div 8$</td><td>$128 = d_\text{head}$ ✓</td></tr>
-<tr><td>拼接维度</td><td>$32 \times 128$</td><td>$4096 = d_\text{model}$ ✓</td></tr>
-<tr><td>$W_O$ 输入维度</td><td>拼接后 $[1,\ 4096]$</td><td>与 $W_O$ 行数匹配 ✓</td></tr>
-<tr><td>GQA 每组 Q 数</td><td>$32 \div 8$</td><td>每 4 个 Q 共享 1 个 KV ✓</td></tr>
+<tr>
+  <td>$W_Q$ 参数量</td>
+  <td>$4096 \times 4096$</td>
+  <td>16,777,216 ✓</td>
+</tr>
+<tr>
+  <td>$W_K$ 参数量</td>
+  <td>$4096 \times 1024$</td>
+  <td>4,194,304 ✓</td>
+</tr>
+<tr>
+  <td>$W_V$ 参数量</td>
+  <td>$4096 \times 1024$</td>
+  <td>4,194,304 ✓</td>
+</tr>
+<tr>
+  <td>$W_O$ 参数量</td>
+  <td>$4096 \times 4096$</td>
+  <td>16,777,216 ✓</td>
+</tr>
+<tr>
+  <td>Q 切分后每头维度</td>
+  <td>$4096 \div 32$</td>
+  <td>$128 = d_\text{head}$ ✓</td>
+</tr>
+<tr>
+  <td>K/V 切分后每头维度</td>
+  <td>$1024 \div 8$</td>
+  <td>$128 = d_\text{head}$ ✓</td>
+</tr>
+<tr>
+  <td>拼接维度</td>
+  <td>$32 \times 128$</td>
+  <td>$4096 = d_\text{model}$ ✓</td>
+</tr>
+<tr>
+  <td>$W_O$ 输入维度</td>
+  <td>拼接后 $[1,\ 4096]$</td>
+  <td>与 $W_O$ 行数匹配 ✓</td>
+</tr>
+<tr>
+  <td>GQA 每组 Q 数</td>
+  <td>$32 \div 8$</td>
+  <td>每 4 个 Q 共享 1 个 KV ✓</td>
+</tr>
 </tbody>
 </table>
-
 <hr />
-
 <h3>第四步：残差连接</h3>
-$$x_1 = x_0 + \text{attn\_out} \quad [1,\ 4096]$$
-
+<p>$$x_1 = x_0 + \text{attn\_out} \quad [1,\ 4096]$$</p>
 <hr />
-
 <h3>第五步：SwiGLU 前馈网络——三次矩阵乘法</h3>
 <p>GPT-3 的 FFN 是两次矩阵乘法；LLaMA-3 的 SwiGLU FFN 需要<strong>三次</strong>。</p>
 <p>先做第二个 Pre-RMSNorm（形状不变），然后走两条并行的上投影路径：</p>
 <p><strong>Gate 投影：</strong></p>
-$$[1,\ 4096] \cdot W_{\text{gate}}[4096,\ 14336] \rightarrow [1,\ 14336]$$
+<p>$$[1,\ 4096] \cdot W_{\text{gate}}[4096,\ 14336] \rightarrow [1,\ 14336]$$</p>
 <p>再过 SiLU 激活函数：</p>
-$$\text{SiLU}(G) = G \cdot \sigma(G) \quad \text{形状不变} [1,\ 14336]$$
-<p>SiLU 输出接近 0 的地方"关门"，输出大正数的地方"全开"，是一个连续可微的"开关"。</p>
+<p>$$\text{SiLU}(G) = G \cdot \sigma(G) \quad \text{形状不变} [1,\ 14336]$$</p>
+<p>SiLU 不是一个 0～1 有界的开关：输入趋于 $-\infty$ 时输出趋于 0（接近&quot;关门&quot;），但输入在中等负值（约 $-1.28$ 附近）时输出会略微为负（约 $-0.28$），输入是大正数时输出近似等于输入本身、可以远大于 1（没有上界）。更准确的说法是&quot;连续可微、输入越大输出越接近直通、输入越负输出越接近 0（但不严格单调趋零，中间有个小负值区间）&quot;，不是简单的&quot;关门/全开&quot;二值开关。</p>
 <p><strong>Up 投影：</strong></p>
-$$[1,\ 4096] \cdot W_{\text{up}}[4096,\ 14336] \rightarrow [1,\ 14336]$$
+<p>$$[1,\ 4096] \cdot W_{\text{up}}[4096,\ 14336] \rightarrow [1,\ 14336]$$</p>
 <p><strong>逐元素相乘（门控）：</strong></p>
-$$M = \text{SiLU}(G) \odot U \quad [1,\ 14336]$$
+<p>$$M = \text{SiLU}(G) \odot U \quad [1,\ 14336]$$</p>
 <p><strong>Down 投影（降维）：</strong></p>
-$$[1,\ 14336] \cdot W_{\text{down}}[14336,\ 4096] \rightarrow [1,\ 4096]$$
-
-<div class="tip-box">
-<div class="tip-title">小知识点：为什么 SwiGLU 需要两条上投影路径（gate 和 up）？</div>
-<p>GPT-3 的 GELU FFN：</p>
-$$x \xrightarrow{W_1\ [4096 \to 16384]} [1,\ 16384] \xrightarrow{\text{GELU}} [1,\ 16384] \xrightarrow{W_2} [1,\ 4096]$$
-<p>只有一条路：升维 → 激活 → 降维。激活函数作用在所有 16384 个特征上（$4 \times d_\text{model} = 4 \times 4096$），每个特征被"拧一下"，但没有对不同特征的选择性控制。</p>
+<p>$$[1,\ 14336] \cdot W_{\text{down}}[14336,\ 4096] \rightarrow [1,\ 4096]$$</p>
+<hr />
+<p><strong>小知识点：为什么 SwiGLU 需要两条上投影路径（gate 和 up）？</strong></p>
+<p><strong>这里为了方便和 LLaMA-3 直接对比，假设一个和 LLaMA-3 同宽度（$d_\text{model}=4096$）的&quot;GPT-3 式&quot;GELU FFN 结构</strong>（GPT-3 175B 实际的 $d_\text{model}=12288$，真实的 GELU FFN 是 $12288\to49152\to12288$，本文四、五节的横向对比表用的就是这组真实数字；这里的 4096 版本只是同宽度示意结构，不是 GPT-3 175B 的实际维度）：</p>
+<p>$$x \xrightarrow{W_1\ [4096 \to 16384]} [1,\ 16384] \xrightarrow{\text{GELU}} [1,\ 16384] \xrightarrow{W_2} [1,\ 4096]$$</p>
+<p>只有一条路：升维 → 激活 → 降维。GELU 作用在所有 16384 个特征上（$4 \times d_\text{model} = 4 \times 4096$），每个特征的输出本身就是该特征自身取值的非线性函数，所以并非完全没有&quot;选择性&quot;——同一层内不同特征、不同输入取值，GELU 的响应也不同。<strong>需要说明</strong>：SwiGLU 的 gate（$G=xW_\text{gate}$）和 up（$U=xW_\text{up}$）其实来自<strong>同一个输入</strong> $x$，所以 gate 并不是&quot;独立于输入内容之外&quot;的外部信号——这里的&quot;独立&quot;准确说是<strong>参数矩阵和计算分支相互独立</strong>（$W_\text{gate}$ 和 $W_\text{up}$ 是两组不同的可学习参数，各自算出一次独立的投影），不是输入信息或随机变量意义上的独立。更准确的区别是：GELU 对单一投影结果做逐元素非线性；SwiGLU 用同一个输入 $x$，经过<strong>另一组独立参数</strong>再算一次投影（$G$），把它作为门控值去调制第一个投影（$U$）的输出——多出来的是&quot;另一条独立学习的投影分支&quot;，而不是&quot;内容之外的控制通道&quot;。</p>
 <p>SwiGLU 的 FFN：</p>
-$$x \to \underbrace{\text{SiLU}(xW_\text{gate})}_{\text{门控信号，控制"开多少"}} \odot \underbrace{xW_\text{up}}_{\text{特征内容}} \xrightarrow{W_\text{down}} \text{输出}$$
-<p>$W_\text{gate}$ 产生一个和特征维度对应的"阀门"，控制每个中间特征通道的通量；$W_\text{up}$ 提供实际的特征内容；两者逐元素相乘后，被门控值压低的特征对输出贡献变小。</p>
-<p><strong>类比</strong>：普通 GELU FFN 像是一排水管全部打开后统一拧一下（激活）；SwiGLU 是对每根水管装了独立的阀门（$W_\text{gate}$），模型可以动态决定哪些中间特征通，哪些堵。</p>
-</div>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：中间维度为什么是 14336，不是 4 × 4096 = 16384？</div>
+<p>$$x \to \underbrace{\text{SiLU}(xW_\text{gate})}_{\text{门控信号，控制"开多少"}} \odot \underbrace{xW_\text{up}}_{\text{特征内容}} \xrightarrow{W_\text{down}} \text{输出}$$</p>
+<p>$W_\text{gate}$ 产生一个和特征维度对应的门控信号，调制每个中间特征通道的强弱；$W_\text{up}$ 提供实际的特征内容；两者逐元素相乘（$M=\text{SiLU}(G)\odot U$）后，门控值接近 0 的特征对输出贡献变小，门控值较大（可以远超 1）的特征则被放大，不是简单的&quot;通/不通&quot;二值控制。<strong>需要说明</strong>：最终某个通道是被放大还是缩小，不是只由门控值的绝对值单独决定，还取决于 $U$ 本身的值和符号——门控值大于 1 时相对放大 $U$ 的幅度，门控值在 0～1 之间时缩小幅度，门控值为负时可能翻转 $U$ 的符号，而如果 $U$ 本身接近 0，门控值再大最终输出也仍然很小。所以更准确的说法是&quot;门控信号对 $U$ 做乘性调制&quot;，而不是&quot;门控信号单独决定最终贡献&quot;。</p>
+<p><strong>类比（有简化）</strong>：可以粗略类比成给每根水管装了独立的阀门（$W_\text{gate}$），模型可以动态决定哪些中间特征该压低、哪些该放大；但和真实水阀不同的是，这个&quot;阀门&quot;没有 0～1 的硬性上下界——它既可能把信号放大到远超原值，也可能在中间取值区间给出小幅负值，不是一个纯粹的&quot;开关&quot;或&quot;节流阀&quot;。</p>
+<hr />
+<p><strong>小知识点：中间维度为什么是 14336，不是 4 × 4096 = 16384？</strong></p>
 <p>普通 GELU FFN 升维 4 倍：$4096 \times 4 = 16384$。</p>
 <p>SwiGLU 有两个上投影矩阵（$W_\text{gate}$ 和 $W_\text{up}$），如果同样升到 16384，参数量是：</p>
-$$2 \times 4096 \times 16384 + 16384 \times 4096 = 3 \times 4096 \times 16384 \approx 2.01 \text{ 亿}$$
+<p>$$2 \times 4096 \times 16384 + 16384 \times 4096 = 3 \times 4096 \times 16384 \approx 2.01 \text{ 亿}$$</p>
 <p>而普通 FFN（2 次乘法）的参数量是：</p>
-$$2 \times 4096 \times 16384 = 1.34 \text{ 亿}$$
+<p>$$2 \times 4096 \times 16384 = 1.34 \text{ 亿}$$</p>
 <p>如果想让 SwiGLU 的参数量与普通 2 矩阵 GELU FFN（升 4 倍：$d \to 4d$）严格相当，令：</p>
-$$3 \times d \times h_{\text{parity}} = 2 \times d \times 4d \implies h_{\text{parity}} = \frac{8d}{3} = \frac{8 \times 4096}{3} \approx 10923$$
-<p>取 128 对齐（GPU warp 效率）：$85 \times 128 = 10880$ 或 $86 \times 128 = 11008$。</p>
-<p><strong>但 LLaMA-3 实际选了 14336（$= 112 \times 128 = 3.5d$），比参数齐平点大约 30%。</strong> 这是一个工程经验值：Meta 在消融实验中发现 14336 在模型质量与参数量之间取得了更好的平衡，比严格参数齐平的 11008 效果更好；同时 $14336 = 2^{11} \times 7$ 对 GPU 内存对齐友好。</p>
-<p>验算：$3 \times 4096 \times 14336 \approx 1.76$ 亿，比严格齐平方案（$\approx 1.34$ 亿）多约 30%，但 SwiGLU 换来了更强的门控表达力，工程上认为值得。</p>
-<div class="oneliner"><strong>一句话</strong>：14336 不是从"参数对齐→对齐到 128"推出的，而是 Meta 实验找到的最优中间维度，恰好也是 128 的倍数（$112 \times 128$）。</div>
-</div>
-
+<p>$$3 \times d \times h_{\text{parity}} = 2 \times d \times 4d \implies h_{\text{parity}} = \frac{8d}{3} = \frac{8 \times 4096}{3} \approx 10923$$</p>
+<p>如果按 128 对齐（这里只是示意性地展示&quot;就近取整到 128 的倍数&quot;会得到什么数字，不是 LLaMA-3 实际使用的对齐单位——见下文，真正的对齐单位是 1024）：$85 \times 128 = 10880$ 或 $86 \times 128 = 11008$。</p>
+<p><strong>但 LLaMA-3 实际选了 14336（$= 112 \times 128 = 3.5d$）。</strong> 这个数字可以从 Meta 公开的 Llama 3 官方实现（<code>llama/model.py</code>）里的真实公式精确推导出来，不需要诉诸&quot;消融实验&quot;这类无法验证的说法。官方公式是：</p>
+<p>$$h_\text{base} = \frac{2}{3}(4d),\qquad h = \left\lceil \frac{h_\text{base}\times\text{ffn\_dim\_multiplier}}{\text{multiple\_of}} \right\rceil \times \text{multiple\_of}$$</p>
+<p>代入 $d=4096$、<code>ffn_dim_multiplier=1.3</code>、<code>multiple_of=1024</code>：</p>
+<p>$$h_\text{base} = \frac{8\times4096}{3} \approx 10922.67,\qquad h_\text{base}\times1.3 \approx 14199.47$$</p>
+<p>$$\left\lceil\frac{14199.47}{1024}\right\rceil = 14,\qquad 14\times1024 = \textbf{14336}$$</p>
+<p>正好对上。所以 14336 不是&quot;128 对齐&quot;或者神秘的消融实验最优值，而是&quot;$\frac{8d}{3}$ 参数齐平点 × 1.3 倍放大系数，再向上取整到 1024 的倍数&quot;这个具体配置公式算出来的——<code>multiple_of=1024</code> 才是真正的对齐单位，128 只是恰好也能整除 14336（$14336=112\times128$）的一个巧合，不是设计依据。</p>
+<p>验算：$3 \times 4096 \times 14336 \approx 1.76$ 亿，比严格齐平方案（$\approx 1.34$ 亿）多约 30%。<strong>需要注意精确比例</strong>：$14336/10922.67\approx1.3125$，即实际增加约 <strong>31.25%</strong>，不是恰好 30%——<code>ffn_dim_multiplier=1.3</code>（30%）描述的是向上取整<strong>之前</strong>的放大系数，取整到 1024 的倍数之后，最终比例变成了 1.3125（31.25%），两者相差约 1.25 个百分点，不完全相同。</p>
+<hr />
 <h4>量纲自检：FFN 层</h4>
-<table class="check-table">
-<thead><tr><th>检查项</th><th>计算</th><th>结果</th></tr></thead>
+<table>
+<thead>
+<tr>
+  <th>检查项</th>
+  <th>计算</th>
+  <th>结果</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Gate 投影输出</td><td>$[1,\ 4096] \times [4096,\ 14336]$</td><td>$[1,\ 14336]$ ✓</td></tr>
-<tr><td>Up 投影输出</td><td>$[1,\ 4096] \times [4096,\ 14336]$</td><td>$[1,\ 14336]$ ✓</td></tr>
-<tr><td>SiLU 激活</td><td>$[1,\ 14336]$ 逐元素</td><td>$[1,\ 14336]$ ✓</td></tr>
-<tr><td>门控相乘</td><td>$[1,\ 14336] \odot [1,\ 14336]$</td><td>$[1,\ 14336]$ ✓</td></tr>
-<tr><td>Down 投影输出</td><td>$[1,\ 14336] \times [14336,\ 4096]$</td><td>$[1,\ 4096]$ ✓</td></tr>
-<tr><td>第二残差</td><td>$[1,\ 4096] + [1,\ 4096]$</td><td>$[1,\ 4096]$ ✓</td></tr>
+<tr>
+  <td>Gate 投影输出</td>
+  <td>$[1,\ 4096] \times [4096,\ 14336]$</td>
+  <td>$[1,\ 14336]$ ✓</td>
+</tr>
+<tr>
+  <td>Up 投影输出</td>
+  <td>$[1,\ 4096] \times [4096,\ 14336]$</td>
+  <td>$[1,\ 14336]$ ✓</td>
+</tr>
+<tr>
+  <td>SiLU 激活</td>
+  <td>$[1,\ 14336]$ 逐元素</td>
+  <td>$[1,\ 14336]$ ✓</td>
+</tr>
+<tr>
+  <td>门控相乘</td>
+  <td>$[1,\ 14336] \odot [1,\ 14336]$</td>
+  <td>$[1,\ 14336]$ ✓</td>
+</tr>
+<tr>
+  <td>Down 投影输出</td>
+  <td>$[1,\ 14336] \times [14336,\ 4096]$</td>
+  <td>$[1,\ 4096]$ ✓</td>
+</tr>
+<tr>
+  <td>第二残差</td>
+  <td>$[1,\ 4096] + [1,\ 4096]$</td>
+  <td>$[1,\ 4096]$ ✓</td>
+</tr>
 </tbody>
 </table>
-
 <hr />
-
 <h3>第六步：Unembedding + Softmax</h3>
 <p>经过 32 层后，做 Final RMSNorm，再经过 LM Head：</p>
-$$h_\text{final} [1,\ 4096] \cdot U[4096,\ 128256] \rightarrow [1,\ 128256]$$
+<p>$$h_\text{final} [1,\ 4096] \cdot U[4096,\ 128256] \rightarrow [1,\ 128256]$$</p>
 <p>Softmax 后得到 128,256 个词的概率分布，取样得到下一个 token。</p>
-
 <hr />
-
 <h3>完整数据流</h3>
 <pre><code>1 个 token（id = 某整数）
    ↓ Embedding [128256, 4096]
@@ -640,231 +856,395 @@ h_final: [1, 4096]
    ↓ × LM Head [4096, 128256]
 logits: [1, 128256]
    ↓ Softmax / top-p / top-k
-预测的下一个 token</code></pre>
-
+预测的下一个 token
+</code></pre>
 <hr />
-
 <h2 id="sec4">四、一层 Block 参数量汇总</h2>
 <table>
-<thead><tr><th>组件</th><th>矩阵形状</th><th>参数量</th></tr></thead>
+<thead>
+<tr>
+  <th>组件</th>
+  <th>矩阵形状</th>
+  <th>参数量</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>$W_Q$</td><td>$[4096,\ 4096]$</td><td>16,777,216</td></tr>
-<tr><td>$W_K$</td><td>$[4096,\ 1024]$</td><td>4,194,304</td></tr>
-<tr><td>$W_V$</td><td>$[4096,\ 1024]$</td><td>4,194,304</td></tr>
-<tr><td>$W_O$</td><td>$[4096,\ 4096]$</td><td>16,777,216</td></tr>
-<tr><td><strong>Attention 合计</strong></td><td></td><td><strong>41,943,040</strong></td></tr>
-<tr><td>$W_\text{gate}$</td><td>$[4096,\ 14336]$</td><td>58,720,256</td></tr>
-<tr><td>$W_\text{up}$</td><td>$[4096,\ 14336]$</td><td>58,720,256</td></tr>
-<tr><td>$W_\text{down}$</td><td>$[14336,\ 4096]$</td><td>58,720,256</td></tr>
-<tr><td><strong>SwiGLU 合计</strong></td><td></td><td><strong>176,160,768</strong></td></tr>
-<tr><td>两个 RMSNorm</td><td>$[4096] \times 2$</td><td>8,192</td></tr>
-<tr><td><strong>一层合计</strong></td><td></td><td><strong>218,112,000</strong></td></tr>
+<tr>
+  <td>$W_Q$</td>
+  <td>$[4096,\ 4096]$</td>
+  <td>16,777,216</td>
+</tr>
+<tr>
+  <td>$W_K$</td>
+  <td>$[4096,\ 1024]$</td>
+  <td>4,194,304</td>
+</tr>
+<tr>
+  <td>$W_V$</td>
+  <td>$[4096,\ 1024]$</td>
+  <td>4,194,304</td>
+</tr>
+<tr>
+  <td>$W_O$</td>
+  <td>$[4096,\ 4096]$</td>
+  <td>16,777,216</td>
+</tr>
+<tr>
+  <td><strong>Attention 合计</strong></td>
+  <td></td>
+  <td><strong>41,943,040</strong></td>
+</tr>
+<tr>
+  <td>$W_\text{gate}$</td>
+  <td>$[4096,\ 14336]$</td>
+  <td>58,720,256</td>
+</tr>
+<tr>
+  <td>$W_\text{up}$</td>
+  <td>$[4096,\ 14336]$</td>
+  <td>58,720,256</td>
+</tr>
+<tr>
+  <td>$W_\text{down}$</td>
+  <td>$[14336,\ 4096]$</td>
+  <td>58,720,256</td>
+</tr>
+<tr>
+  <td><strong>SwiGLU 合计</strong></td>
+  <td></td>
+  <td><strong>176,160,768</strong></td>
+</tr>
+<tr>
+  <td>两个 RMSNorm</td>
+  <td>$[4096] \times 2$</td>
+  <td>8,192</td>
+</tr>
+<tr>
+  <td><strong>一层合计</strong></td>
+  <td></td>
+  <td><strong>218,112,000</strong></td>
+</tr>
 </tbody>
 </table>
-
 <p><strong>与 GPT-3 的横向对比：</strong></p>
 <table>
-<thead><tr><th></th><th>GPT-3 一层</th><th>LLaMA-3 8B 一层</th></tr></thead>
+<thead>
+<tr>
+  <th></th>
+  <th>GPT-3 一层</th>
+  <th>LLaMA-3 8B 一层</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Attention 参数</td><td>$4 \times 12288^2 = $ 6.04 亿（MHA）</td><td>4194 万（GQA 减少 37.5%）</td></tr>
-<tr><td>FFN 参数</td><td>$2 \times 12288 \times 49152 = $ 12.08 亿</td><td>1.76 亿（参数量 $\approx$ 1/7）</td></tr>
-<tr><td>一层合计</td><td>18.1 亿</td><td>2.18 亿</td></tr>
+<tr>
+  <td>Attention 参数</td>
+  <td>$4 \times 12288^2 = $ 6.04 亿（MHA，$d_\text{model}=12288$）</td>
+  <td>4194 万</td>
+</tr>
+<tr>
+  <td>FFN 参数</td>
+  <td>$2 \times 12288 \times 49152 = $ 12.08 亿</td>
+  <td>1.76 亿（参数量 $\approx$ 1/7）</td>
+</tr>
+<tr>
+  <td>一层合计</td>
+  <td>18.1 亿</td>
+  <td>2.18 亿</td>
+</tr>
 </tbody>
 </table>
+<p><strong>&quot;GQA 减少 37.5%&quot;这个说法需要说明比较对象</strong>：$1-\dfrac{41.943\text{M}}{4\times4096^2}=37.5\%$，这里的分母 $4\times4096^2$ 是&quot;同样 32 个 Q head、同样 4096 维，但把 8 个 KV head 换成 32 个 KV head&quot;这个<strong>假想的同宽度 MHA 版本</strong>，不是表格左边 GPT-3 实际的 6.04 亿（那是 $d_\text{model}=12288$、96 头的配置，规模完全不同）。也就是说，&quot;37.5%&quot;是&quot;LLaMA-3 用 GQA vs. LLaMA-3 假想用 MHA&quot;的对比，不是&quot;LLaMA-3 vs. GPT-3&quot;的对比——表格本身的两列数字（6.04 亿 vs 4194 万）已经如实反映了两个不同规模模型的差距，只是这个差距主要来自 $d_\text{model}$ 从 12288 降到 4096，GQA 本身贡献的是后面这个&quot;同宽度下降 37.5%&quot;的部分。</p>
 <p>两者整体规模比：$175\text{B} / 8\text{B} \approx 21.8$ 倍；但一层参数比约 $1812\text{M} / 218\text{M} \approx 8.3$ 倍，远小于整体比。原因：GPT-3 有 96 层，LLaMA-3 只有 32 层，层数之比约 3×，$8.3 \times 3 \approx 25$，与整体比 21.8× 数量级一致（差异来自 Embedding 等非块参数占比不同）。</p>
-
 <hr />
-
 <h2 id="sec5">五、32 层累计与总参数量</h2>
-$$32 \times 218{,}112{,}000 = 6{,}979{,}584{,}000$$
+<p>$$32 \times 218{,}112{,}000 = 6{,}979{,}584{,}000$$</p>
 <p>Embedding：</p>
-$$128{,}256 \times 4{,}096 = 525{,}336{,}576$$
+<p>$$128{,}256 \times 4{,}096 = 525{,}336{,}576$$</p>
 <p>LM Head（不共享权重）：</p>
-$$4{,}096 \times 128{,}256 = 525{,}336{,}576$$
+<p>$$4{,}096 \times 128{,}256 = 525{,}336{,}576$$</p>
 <p>Final RMSNorm：$4{,}096$</p>
 <p>总计：</p>
-$$6{,}979{,}584{,}000 + 525{,}336{,}576 + 525{,}336{,}576 + 4{,}096 = \textbf{8{,}030{,}261{,}248}$$
+<p>$$6{,}979{,}584{,}000 + 525{,}336{,}576 + 525{,}336{,}576 + 4{,}096 = \textbf{8{,}030{,}261{,}248}$$</p>
 <p>约 <strong>8.03B 参数</strong>。✓ 与标称一致。</p>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：Embedding 和 LM Head 为什么不共享权重？</div>
-<p>很多早期语言模型（如 GPT-2）把 Embedding 矩阵和 LM Head 绑定为同一份参数（Weight Tying），即 $U = E^\top$，可以节省 $\lvert V \rvert \times d = 5.25$ 亿参数。</p>
-<p>LLaMA-3 选择不共享。原因：Embedding 的职责是把离散 token id 映射到连续语义空间，LM Head 的职责是把连续表示打分回词表概率——两者的优化方向在充分训练后往往有所分歧。Meta 实验发现在 15T+ token 的规模下，不共享权重能带来轻微质量提升，代价是多占 5.25 亿参数的显存。</p>
-<div class="oneliner"><strong>一句话</strong>：Embedding 是"翻译器（id→向量）"，LM Head 是"评分器（向量→概率）"，两者任务不同，让它们各自独立优化更合理。</div>
-</div>
-
 <hr />
-
+<p><strong>小知识点：Embedding 和 LM Head 为什么不共享权重？</strong></p>
+<p>很多早期语言模型（如 GPT-2）把 Embedding 矩阵和 LM Head 绑定为同一份参数（Weight Tying），即 $U = E^\top$，可以节省 $\lvert V \rvert \times d = 5.25$ 亿参数。</p>
+<p>LLaMA-3 选择不共享，代价是多占 5.25 亿参数的显存。一个合理的设计动机解释是：Embedding 的职责是把离散 token id 映射到连续语义空间，LM Head 的职责是把连续表示打分回词表概率——两者的优化方向在充分训练后可能有所分歧，分开优化理论上更灵活。<strong>需要说明</strong>：这只是一种合理的动机推测，本文没有找到 Meta 公开发布的、专门针对&quot;不共享权重带来轻微质量提升&quot;这一结论的第一方实验数据，不能把这个解释当作 Meta 已经证实的实验结论来引用。</p>
+<p><strong>一句话</strong>：Embedding 是&quot;翻译器（id→向量）&quot;，LM Head 是&quot;评分器（向量→概率）&quot;，两者任务不同，让它们各自独立优化更合理。</p>
+<hr />
 <h2 id="sec6">六、KV Cache：为什么 GQA 对推理至关重要</h2>
 <p>自回归推理时，每生成一个新 token，旧 token 的 $K$ 和 $V$ 不需要重新计算——只需在第一次经过时把它们存起来，后续生成直接读取。</p>
-
-<div class="warning-box">
-<div class="warning-title">容易犯的错误：KV Cache 存的不是整个激活</div>
+<hr />
+<p><strong>容易犯的错误：KV Cache 存的不是整个激活</strong></p>
 <p>一层前向传播有许多中间激活（Q、K、V、注意力得分、FFN 升维结果……），但只有 K 和 V 能被复用：</p>
 <ul>
-<li>K 和 V 只取决于对应位置的 token 输入，不依赖当前新 token</li>
-<li>Q 是当前新 token 自己产生的，每步都不同，<strong>不能</strong> cache</li>
-<li>FFN 的中间激活也依赖当前 token，<strong>不能</strong> cache</li>
+<li><strong>K 和 V 可以缓存，根本原因是因果模型的性质</strong>：后面追加新 token 不会改变历史位置已经算出的隐藏状态和 K/V——这一点在第一层（隐藏状态就是 token embedding 本身）看起来像是&quot;K/V 只取决于对应位置的 token&quot;，但在更深的层里并不准确：深层的隐藏状态是该位置及之前所有可见 token 经过多层 attention 混合后的结果，并不只取决于这一个位置自己的 token 输入。真正保证可以缓存的，是&quot;追加未来 token 不会反过来改变过去位置已经算出的结果&quot;这条因果性质，而不是&quot;K/V 只依赖单个 token 输入&quot;这个更强、但对深层不成立的说法。</li>
+<li>Q 也不是数学上&quot;不能&quot;缓存，而是<strong>没有必要缓存</strong>：历史位置的 Q 只在算出当时那一步的输出后就不再被用到，后续的 decode 步骤用的是新 token 自己的 Q，缓存旧 Q 没有意义。</li>
+<li>FFN 的中间激活同样依赖当前 token 及其对应位置的完整隐藏状态，且不会被后续步骤复用，所以不缓存。</li>
 </ul>
 <p>所以 KV Cache 存的是：</p>
-$$\text{每层} \times \text{每个历史 token} \times \{K_\text{head}, V_\text{head}\} \times n_{kv} \text{ 组}$$
-</div>
-
+<p>$$\text{每层} \times \text{每个历史 token} \times \{K_\text{head}, V_\text{head}\} \times n_{kv} \text{ 组}$$</p>
+<hr />
 <p><strong>LLaMA-3 8B 的 KV Cache 计算：</strong></p>
 <p>一层、一个 token 需要存储的元素数：</p>
-$$K \text{ 部分：} n_{kv} \times d_\text{head} = 8 \times 128 = 1024 \text{ 个数}$$
-$$V \text{ 部分：} n_{kv} \times d_\text{head} = 8 \times 128 = 1024 \text{ 个数}$$
-<p>BF16 每个数 2 字节：</p>
-$$2048 \times 2 = 4096 \text{ bytes} = 4 \text{ KB / token / 层}$$
+<p>$$K \text{ 部分：} n_{kv} \times d_\text{head} = 8 \times 128 = 1024 \text{ 个数}$$</p>
+<p>$$V \text{ 部分：} n_{kv} \times d_\text{head} = 8 \times 128 = 1024 \text{ 个数}$$</p>
+<p>BF16 每个数 2 字节（这里的 KB/MB/GB 按二进制口径计算，$1\text{KB}=1024$ 字节，严格写法是 KiB/MiB/GiB，工程语境里通常还是习惯写 KB/MB/GB）：</p>
+<p>$$2048 \times 2 = 4096 \text{ bytes} = 4 \text{ KiB / token / 层}$$</p>
 <p>32 层：</p>
-$$32 \times 4 \text{ KB} = \textbf{128 KB / token}$$
-
+<p>$$32 \times 4 \text{ KiB} = \textbf{128 KiB / token}$$</p>
 <table>
-<thead><tr><th style="text-align:right">上下文长度</th><th style="text-align:right">BF16 KV Cache（batch = 1）</th></tr></thead>
+<thead>
+<tr>
+  <th style="text-align:right">上下文长度</th>
+  <th style="text-align:right">BF16 KV Cache（batch = 1）</th>
+</tr>
+</thead>
 <tbody>
-<tr><td style="text-align:right">1,024</td><td style="text-align:right">128 MB</td></tr>
-<tr><td style="text-align:right">8,192</td><td style="text-align:right"><strong>1 GB</strong></td></tr>
-<tr><td style="text-align:right">32,768</td><td style="text-align:right">4 GB</td></tr>
-<tr><td style="text-align:right">128,000</td><td style="text-align:right">15.6 GB</td></tr>
+<tr>
+  <td style="text-align:right">1,024</td>
+  <td style="text-align:right">128 MiB</td>
+</tr>
+<tr>
+  <td style="text-align:right">8,192（LLaMA-3 8B 原生上下文长度）</td>
+  <td style="text-align:right"><strong>1 GiB</strong></td>
+</tr>
+<tr>
+  <td style="text-align:right">32,768（<strong>超出原生上下文的外推</strong>，需要额外的长上下文扩展方法，不是原版模型原生支持）</td>
+  <td style="text-align:right">4 GiB</td>
+</tr>
+<tr>
+  <td style="text-align:right">128,000（<strong>同样是超出原生上下文的外推</strong>）</td>
+  <td style="text-align:right">15.6 GiB</td>
+</tr>
 </tbody>
 </table>
-
-<p><strong>如果用 MHA（32 个 KV head 而不是 8 个）：</strong></p>
-$$2 \times 32 \times 128 \times 2 \times 32 = 524{,}288 \text{ bytes} = 512 \text{ KB / token}$$
+<p><strong>如果用 MHA（32 个 KV head 而不是 8 个，同样按二进制 KiB/GiB 口径）：</strong></p>
+<p>$$2 \times 32 \times 128 \times 2 \times 32 = 524{,}288 \text{ bytes} = 512 \text{ KiB / token}$$</p>
 <p>8K 上下文：</p>
-$$8192 \times 512 \text{ KB} = \textbf{4 GB}$$
-<p>GQA 把 8K 上下文的 KV Cache 从 4 GB 降到 1 GB——<strong>降为 1/4</strong>。</p>
+<p>$$8192 \times 512 \text{ KiB} = \textbf{4 GiB}$$</p>
+<p>GQA 把 8K 上下文的 KV Cache 从 4 GiB 降到 1 GiB——<strong>降为 1/4</strong>。</p>
 <p><strong>直觉</strong>：KV Cache 大小 = 层数 × KV head 数 × head 维度 × 序列长度 × 精度字节数。GQA 把 KV head 从 32 砍到 8，其余不变，Cache 直接缩小 4 倍。</p>
-
 <hr />
-
 <h2 id="sec7">七、FLOPs 计算：Prefill 与 Decode 分开看</h2>
 <p>推理分两个阶段，计算特征完全不同：</p>
 <table>
-<thead><tr><th>阶段</th><th>含义</th><th>计算特点</th></tr></thead>
+<thead>
+<tr>
+  <th>阶段</th>
+  <th>含义</th>
+  <th>计算特点</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>Prefill</td><td>一次性读入完整 prompt</td><td>矩阵×矩阵，算力利用高；attention 有 $S^2$ 项</td></tr>
-<tr><td>Decode</td><td>每步生成 1 个新 token</td><td>矩阵×向量，受显存带宽瓶颈</td></tr>
+<tr>
+  <td>Prefill</td>
+  <td>一次性读入完整 prompt</td>
+  <td>矩阵×矩阵，算力利用高；attention 有 $S^2$ 项</td>
+</tr>
+<tr>
+  <td>Decode</td>
+  <td>每步生成 1 个新 token</td>
+  <td>矩阵×向量，受显存带宽瓶颈</td>
+</tr>
 </tbody>
 </table>
-
 <h3>Prefill（seq_len = 8192，32 层）</h3>
 <p>一层线性层 FLOPs（attention 4 次 + FFN 3 次，共 $41.9\text{M} + 176.2\text{M} = 218.1\text{M}$ 参数）：</p>
-$$2 \times 8192 \times 218{,}103{,}808 \approx 3.57 \times 10^{12}$$
-<p>一层 attention 二次项（$QK^\top$ + $AV$）：</p>
-$$2 \times 2 \times n_q \times S^2 \times d_\text{head} = 2 \times 2 \times 32 \times 8192^2 \times 128 \approx 1.10 \times 10^{12}$$
+<p>$$2 \times 8192 \times 218{,}103{,}808 \approx 3.57 \times 10^{12}$$</p>
+<p>一层 attention 二次项（$QK^\top$ + $AV$，按完整稠密 attention 矩阵计算 FLOPs 的口径——不一定代表优化 kernel 实际执行的计算量，见下文说明）：</p>
+<p>$$2 \times 2 \times n_q \times S^2 \times d_\text{head} = 2 \times 2 \times 32 \times 8192^2 \times 128 \approx 1.10 \times 10^{12}$$</p>
 <p>32 层总 FLOPs：</p>
-$$32 \times (3.57 + 1.10) \times 10^{12} \approx \textbf{1.50 \times 10^{14}}$$
-<p>即 8K prompt 的一次 prefill 约 <strong>150 TFLOPs</strong>。</p>
-
-<h3>Decode（已有 8192 token 的 KV Cache，生成第 8193 个 token）</h3>
+<p>$$32 \times (3.57 + 1.10) \times 10^{12} \approx \textbf{1.50 \times 10^{14}}$$</p>
+<p>即 8K prompt 的一次 prefill，<strong>32 层 Transformer 主干</strong>（线性层 + attention 二次项）约 <strong>150 TFLOPs</strong>。</p>
+<p><strong>这个口径需要明确几点</strong>：</p>
+<ul>
+<li>这里没有算 LM Head。如果要一次性算出全部 8192 个位置的 logits，还要再加 $2\times8192\times4096\times128256\approx8.61\times10^{12}\approx8.61$ TFLOPs，合计约 158 TFLOPs；但实际推理服务通常只需要 prompt 最后一个位置的 logits（用来生成第一个新 token），这种情况下 LM Head 只需要约 1.05 GFLOPs（和下面 Decode 的 LM Head 量级一样），可以忽略。所以&quot;150 TFLOPs&quot;要看清楚指的是哪种口径，不能笼统地叫&quot;完整 prefill 全部计算量&quot;。</li>
+<li>attention 二次项这里按完整 $S^2$（稠密）口径计算，更精确地算是 <strong>149.53 TFLOPs</strong>；支持 causal 跳算的优化 kernel 理论上只需要算下三角部分，这一项可以减半，此时 32 层主干合计约为 <strong>131.94 TFLOPs</strong>——比稠密口径低约 11.8%，量级不变但也不算完全可以忽略。需要注意：并非所有 kernel 都严格实现&quot;实际只算一半&quot;，具体减少多少取决于实现方式，所以更稳妥的说法是&quot;理论上可以减半&quot;，而不是断言&quot;实际只需要算下三角&quot;。</li>
+<li>Softmax、RoPE、RMSNorm 这些逐元素操作的 FLOPs 也被忽略了（量级上远小于矩阵乘法）。</li>
+</ul>
+<p>所以&quot;150 TFLOPs&quot;是一个<strong>近似的 FLOPs 模型</strong>，不是某种精确到底的唯一实际值。</p>
+<h3>Decode（处理第 8192 个输入 token，attention 长度 8192——LLaMA-3 8B 原生上下文正好是 8192，这里刚好没有越界；如果下一步还要再送入一个 token，就已经超出原生上下文长度，需要额外的长上下文扩展方法）</h3>
+<p><strong>这里需要先说清楚&quot;生成&quot;和&quot;处理&quot;这两个时间点的先后关系，避免差一位的误解</strong>：自回归解码的实际顺序是——(1) 已经处理完前 $t$ 个 token，得到位置 $t$ 的 logits；(2) 用这份 logits 采样出第 $t+1$ 个 token；(3) 下一次模型调用才把刚采样出的第 $t+1$ 个 token 喂进模型，它的 query 看到前面 $t$ 个位置 + 自身共 $t+1$ 个位置，算出的是用于采样第 $t+2$ 个 token 的 logits。也就是说，采样第 8192 个 token 这个<strong>动作本身</strong>（从已算好的 logits 里做一次采样）确实几乎不产生新的矩阵乘法——但这<strong>不代表生成第 8192 个 token&quot;不需要 19.3 GFLOPs 的前向计算&quot;</strong>：这份计算实际发生在<strong>上一轮</strong>处理第 8191 个输入 token 时（那一轮的 attention 长度是 8191，量级和这里的 19.3 GFLOPs 几乎相同），只是编号错开一位。稳态解码中，每生成一个新 token，平均仍对应一次约 19.3 GFLOPs 的单 token 前向传播，只是这次前向传播发生在<strong>处理前一个 token 输入</strong>的那一轮，而不是&quot;采样出新 token&quot;的那个瞬间。下面这次计算，喂入的是刚采样出的第 8192 个 token，attention 长度是 8192（8191 个历史位置 + 自身），算出的是用于采样第 8193 个 token 的 logits——严格说这是&quot;处理第 8192 个输入 token&quot;的计算量，但按上面的稳态关系，也可以等价地称为&quot;生成第 8193 个 token 所需的约 19.3 GFLOPs&quot;。两者 attention 长度只差 1（8191 vs 8192），数值上 19.3 GFLOPs 在这个精度下仍然成立；另外，&quot;已有 8191 个位置的 KV Cache&quot;本身不保证对应的 logits 仍然保留在内存中，只是标准的连续生成循环里，上一轮通常会同时返回这份 logits，采样才能几乎零成本地进行。</p>
 <p>一层线性层（仅 1 个 token）：</p>
-$$2 \times 1 \times 218{,}103{,}808 \approx 4.36 \times 10^8$$
-<p>一层 attention（1 个 query token 看 8193 个历史 token）：</p>
-$$2 \times 2 \times 32 \times 1 \times 8193 \times 128 \approx 1.34 \times 10^8$$
+<p>$$2 \times 1 \times 218{,}103{,}808 \approx 4.36 \times 10^8$$</p>
+<p>一层 attention（新输入 token 的 1 个 query，要看包括自己在内、总共 8192 个位置的 K/V：8191 个历史位置 + 自身）：</p>
+<p>$$2 \times 2 \times 32 \times 1 \times 8192 \times 128 \approx 1.34 \times 10^8$$</p>
 <p>32 层合计：</p>
-$$32 \times (4.36 + 1.34) \times 10^8 \approx 1.82 \times 10^{10}$$
+<p>$$32 \times (4.36 + 1.34) \times 10^8 \approx 1.82 \times 10^{10}$$</p>
 <p>加上 LM Head：</p>
-$$2 \times 4096 \times 128{,}256 \approx 1.05 \times 10^9$$
-<p>单 token decode 约 <strong>19.3 GFLOPs</strong>。</p>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：decode 为什么比 prefill 慢（每 token 吞吐更低）？</div>
+<p>$$2 \times 4096 \times 128{,}256 \approx 1.05 \times 10^9$$</p>
+<p>单 token decode 约 <strong>19.3 GFLOPs</strong>（这里只统计主要矩阵运算，不包含采样/top-k/top-p、KV Cache 写入、kernel launch 等开销——这些通常不是主要 FLOPs 来源，量级上可以忽略）。</p>
+<hr />
+<p><strong>小知识点：decode 为什么比 prefill 慢（每 token 吞吐更低）？</strong></p>
 <p>表面看：prefill 一次算 8192 个 token，用了 150 TFLOPs；decode 每次只算 1 个 token，只用 19 GFLOPs，似乎快很多？</p>
 <p>但这里有个关键区别：</p>
 <ul>
 <li><strong>Prefill</strong> 是矩阵 × 矩阵（$X_{[S,d]} \times W_{[d,d]}$），两个大矩阵相乘，算术强度（FLOPs / 显存读写量）很高，GPU 算力核心可以被高效利用</li>
 <li><strong>Decode</strong> 退化成矩阵 × 向量（$x_{[1,d]} \times W_{[d,d]}$），每次只有 1 行，而 $W$ 矩阵需要从显存完整读出，算术强度极低</li>
 </ul>
-<p>结果是：decode 的瓶颈不是 GPU 算力，而是<strong>显存带宽</strong>——GPU 的算力核心大量空闲，在等待显存把权重矩阵"喂进来"。</p>
+<p>结果是：对于 batch 较小的常规单 token decode，瓶颈通常不是 GPU 算力，而是<strong>显存带宽</strong>——GPU 的算力核心大量空闲，在等待显存把权重矩阵&quot;喂进来&quot;。<strong>这不是所有 decode 场景下都成立的绝对结论</strong>：连续批处理（continuous batching）下 batch 较大时、上下文很长导致 attention/KV 读取占比上升时、speculative decoding 一次验证多个 token 时、张量并行通信成为瓶颈时，或权重部分驻留在更高层缓存时，算术强度可能提高、瓶颈也可能转移。更准确的说法是&quot;小 batch 常规 decode 通常是显存带宽受限&quot;，而不是笼统地说&quot;decode 的瓶颈不是算力就是显存带宽&quot;。</p>
 <p>这就是为什么 KV Cache 的显存占用、batch size、以及 W_K/W_V 的大小（即 GQA 的意义）对推理吞吐如此关键。</p>
-<div class="oneliner"><strong>一句话</strong>：decode 不是算不过来，而是显存带宽跟不上 GPU 的饭量——KV Cache 越小，能同时跑的 batch 越大，整体吞吐才越高。</div>
-</div>
-
+<p><strong>一句话</strong>：小 batch 的常规 decode 通常不是算不过来，而是显存带宽跟不上 GPU 的饭量——KV Cache 越小，能同时跑的 batch 越大，整体吞吐才越高。</p>
 <hr />
-
 <h2 id="sec8">八、训练 FLOPs 与能耗换算</h2>
-
 <h3>用经验公式估算训练 FLOPs</h3>
 <p>大语言模型训练常用粗略估算：</p>
-$$\text{训练 FLOPs} \approx 6 \times N \times T$$
-<p>其中 $N$ 为参数量，$T$ 为训练 token 数，系数 6 来自"前向 $\approx 2NT$，反向 $\approx 4NT$"。</p>
-
-<div class="tip-box">
-<div class="tip-title">小知识点：系数 6 是怎么来的？</div>
-<p>一次前向传播：每个参数参与一次乘加，共约 $2NT$ FLOPs（乘法 + 加法各算 1 次）。</p>
+<p>$$\text{训练 FLOPs} \approx 6 \times N \times T$$</p>
+<p>其中 $N$ 为参数量，$T$ 为训练 token 数，系数 6 来自&quot;前向 $\approx 2NT$，反向 $\approx 4NT$&quot;。</p>
+<hr />
+<p><strong>小知识点：系数 6 是怎么来的？</strong></p>
+<p>一次前向传播：每个参数参与一次乘加，共约 $2NT$ FLOPs（乘法 + 加法各算 1 次）。<strong>这里有两处不完全精确的地方，方向相反，不能只看其中一个就下结论</strong>：</p>
+<ul>
+<li><strong>Token Embedding 查表被当成了矩阵乘法，导致 $6NT$ 偏高</strong>：这对参与矩阵乘法的权重（$W_Q,W_K,W_V,W_O,W_\text{gate},W_\text{up},W_\text{down}$，以及 LM Head 这类真正的稠密投影）是成立的；但 $N$ 里还包含 Token Embedding 查表矩阵（约 5.25 亿参数）——查表操作只是按 token id 取出对应的一行，几乎不产生 FLOPs。把这部分也当成参与矩阵乘法，会带来约 $525\text{M}/8.03\text{B}\approx6.5\%$ 的高估。</li>
+<li><strong>Attention 的 $QK^\top$、$\alpha V$ 这两个二次项完全没有计入 $6NT$，导致 $6NT$ 偏低</strong>：$6NT$ 只统计了参数矩阵的乘法，不包含 attention 内部这两个不带参数、但确实消耗 FLOPs 的矩阵乘法（第七节 Prefill 部分单独算过这一项）——这个遗漏量级上比 Embedding 那 6.5% 的高估更大。</li>
+</ul>
+<p>用本文自己的参数重新拼一遍，同时扣掉 Embedding 查表、又补上 attention 二次项：<strong>整个模型</strong>（32 层 Transformer Block 的线性层 + LM Head，已扣掉 Embedding 查表）每个 token 的稠密矩阵乘法 FLOPs（前向+反向）约为 $6\times7.505\times10^9\approx45.03$ GFLOPs/token（这里 $7.505\times10^9=32\times218{,}103{,}808+525{,}336{,}576$，是 32 层线性层加 LM Head 的<strong>总和</strong>，不是单层的数字——单层每个 token 约为 $6\times218{,}103{,}808\approx1.31$ GFLOPs/token）；再加上 attention 二次项（前向+反向，同样是 32 层的总和），causal 减半口径下约 6.44 GFLOPs/token，完整稠密 $S^2$ 口径下约 12.88 GFLOPs/token；两种口径下、全模型每 token 合计分别约为 <strong>causal 51.47 GFLOPs/token、稠密 57.91 GFLOPs/token</strong>（两个并列结果，不是同一个量的区间）。按 15T token 代入，总训练 FLOPs 按两种口径分别是：</p>
+<p>$$C_\text{model,\ causal}\approx7.72\times10^{23}\ \text{FLOPs}\qquad C_\text{dense-kernel}\approx8.69\times10^{23}\ \text{FLOPs}$$</p>
+<p><strong>这是两种不同记账口径各自算出的数字，并列展示，不是同一个量的上下界或区间</strong>——都比简化 $6NT$ 算出的 $7.23\times10^{23}$ 更大。这说明 Embedding 造成的 6.5% 高估，被 attention 二次项的遗漏抵消之后还反超了：净效应更可能是简化 $6NT$ <strong>低估</strong>了计算量，而不是高估。</p>
+<p><strong>但需要指出：这两个数字不是同一类&quot;算法 FLOPs&quot;，不应该被笼统地并列成一个统计意义上的区间</strong>：</p>
+<ul>
+<li>$7.72\times10^{23}$（causal 减半口径）：只统计因果注意力实际允许计算的下三角部分，这是因果模型语义上<strong>必需</strong>的有效运算量，是更贴近&quot;模型 FLOPs&quot;定义的数字。<strong>这里&quot;减半&quot;是一个近似</strong>：严格的有效位置数是 $S(S+1)/2$（含对角线自身），不是 $S^2/2$；在 $S=8192$ 时两者相对差异约为 $1/S\approx0.0122\%$，在本文的有效数字下可以忽略，但概念上应知道精确值是 $S(S+1)/2$，&quot;恰好减半&quot;只是 $S$ 较大时的近似说法。</li>
+<li>$8.69\times10^{23}$（完整稠密 $S^2$ 口径）：额外包含了被 causal mask 丢弃的上三角部分。如果某个具体 kernel 确实先算出完整矩阵再 mask 掉一半，这部分是<strong>该 kernel 在硬件上实际执行</strong>的 FLOPs，但不是因果模型定义所必需的有效运算——换一个支持 causal 稀疏计算的 kernel，这部分就不会被执行。</li>
+</ul>
+<p>所以更准确的说法是：$7.72\times10^{23}$ 是&quot;causal 有效/模型 FLOPs&quot;的细化估计；$8.69\times10^{23}$ 是&quot;按完整稠密矩阵记账，或某些未做 causal 优化的 kernel 可能实际执行&quot;的 FLOPs；梯度检查点等还可能让硬件实际执行量进一步增加。这两者是<strong>两套不同的定义</strong>，不是同一个量的置信区间上下界。这两个并列数字同样不是&quot;真实计算量范围&quot;，只是按 15T token、8K 序列长度、两种记账口径分别拼出来的<strong>细化 FLOPs 估计</strong>，比原来的单点估算更完整，但仍然没有计入：真实训练数据的序列长度分布和 packing 方式（不是所有样本都恰好 8K）、梯度检查点重算带来的额外硬件执行 FLOPs、被丢弃/重跑的训练步、RMSNorm/激活函数等逐元素运算，以及&quot;15T&quot;本身只是一个基准代入值而非精确 token 总数——这里只是用来说明&quot;净误差方向不能只看 Embedding 这一项判断&quot;，不是给出了一个更精确的真实 FLOPs 数字。<strong>还需要强调一点</strong>：attention 每 token 的成本随有效序列长度变化，上面 6.44/12.88 GFLOPs/token 这两个数字是按 $S=8192$ 算出来的；&quot;净效应更可能是低估&quot;这个方向性结论，也是在&quot;训练序列有效长度接近 8192&quot;这个假设下成立的，不能脱离这个假设直接推广。Meta 公开的 model card（见 <a href="https://github.com/meta-llama/llama3/blob/main/MODEL_CARD.md">Meta Llama 3 Model Card</a>）说明预训练序列长度是 8192，但没有披露 packing 后的有效长度、padding 比例、是否存在长度课程（不同阶段用不同序列长度）等细节，所以这里的 $S=8192$ 是一个基于官方披露信息的合理近似，不是所有训练阶段、所有样本都严格适用的精确值。</p>
 <p>反向传播需要计算两组梯度：</p>
 <ol>
 <li>对<strong>输入</strong>的梯度（继续反传）：约 $2NT$</li>
 <li>对<strong>权重</strong>的梯度（更新参数）：约 $2NT$</li>
 </ol>
 <p>前向 + 反向 = $2NT + 2NT + 2NT = 6NT$。</p>
-<p>这是数量级估算。实际会因梯度检查点重算、优化器（Adam 的状态更新）、混合精度 loss scaling 等因素略有偏差。</p>
-</div>
-
+<p>这是数量级估算，需要区分三个不同层面，而不是笼统地说&quot;略有偏差&quot;：</p>
+<ul>
+<li><strong>算法模型 FLOPs</strong>（前向 $2NT$ + 对输入梯度 $2NT$ + 对权重梯度 $2NT=6NT$）：这是 $6NT$ 近似的对象本身。</li>
+<li><strong>硬件实际执行的 FLOPs</strong>：如果用了梯度检查点（gradient checkpointing），部分前向激活会在反向时重新计算一遍，这会让实际执行的 FLOPs 明显高于 $6NT$——具体取决于检查点粒度，常见方案可能让实际 FLOPs 比 $6NT$ 多出两位数的百分比，不是一个可以忽略的小修正。</li>
+<li><strong>非&quot;模型 FLOPs&quot;的系统开销</strong>（注意这里不是说它们物理上零 FLOPs——Adam 的一阶/二阶矩更新（$m\leftarrow\beta_1m+(1-\beta_1)g$、$v\leftarrow\beta_2v+(1-\beta_2)g^2$）、AllReduce 通信同步里的规约求和，本身也执行浮点运算）：只是这些操作<strong>不计入标准的模型 FLOPs/MFU 分子</strong>，而且通常受限于显存带宽或网络带宽，算术强度远低于大矩阵乘法，不能简单&quot;加到 $6NT$ 上&quot;——更准确的说法是&quot;$6NT$ 之外的系统开销&quot;，它们会拉低 MFU、拉长墙钟时间，但和 FLOPs 计数是两个不同的维度，不是&quot;不产生浮点运算&quot;。</li>
+</ul>
+<p>所以更准确的说法是：$6NT$ 只是算法层面的近似模型；硬件实际执行的 FLOPs 可能因为梯度检查点重算而明显更高（不只是&quot;略有偏差&quot;）；通信、优化器更新等则是独立于 FLOPs 计数之外的另一类开销，会拉低 MFU，但不应该被理解成&quot;给 $6NT$ 加一个统一修正系数&quot;。</p>
+<hr />
 <p>LLaMA-3 8B：</p>
-$$N \approx 8.03 \times 10^9, \quad T \approx 15 \times 10^{12}$$
-$$6 \times 8.03 \times 10^9 \times 15 \times 10^{12} \approx \textbf{7.23 \times 10^{23} \text{ FLOPs}}$$
-
-<h3>Meta 披露的实际训练数据</h3>
-<p>Meta 在 LLaMA-3 8B 的 model card 中公开了预训练计算：</p>
-$$1.3 \times 10^6 \text{ GPU hours（H100-80GB，功耗口径 700W）}$$
-<p>电能：</p>
-$$1.3 \times 10^6 \times 0.7 \text{ kW} = 910{,}000 \text{ kWh} = \textbf{0.91 GWh}$$
-<p>Meta 披露的碳排放：</p>
-$$\textbf{390 tCO}_2\text{eq}$$
-
+<p>$$N \approx 8.03 \times 10^9, \quad T \approx 15 \times 10^{12}$$</p>
+<p>$$6 \times 8.03 \times 10^9 \times 15 \times 10^{12} \approx \textbf{7.23 \times 10^{23} \text{ FLOPs}}$$</p>
+<p><strong>这里需要说明口径</strong>：Meta 披露的训练 token 数是&quot;15T+&quot;，本文代入的是恰好 $15\times10^{12}$——所以 $7.23\times10^{23}$ 是<strong>按 15T 这个基准值算出来的</strong>，真实训练用的 token 数只要超过 15T，对应的理论 FLOPs 也会相应更大；同时 $6NT$ 本身也只是一个近似公式（如上所述），不是真实 FLOPs 的精确下界。</p>
+<h3>Meta 披露的训练数据，以及据此推算的用电量</h3>
+<p>Meta 在 LLaMA-3 8B 的 model card 中<strong>披露</strong>了预训练计算：</p>
+<p>$$1.3 \times 10^6 \text{ GPU hours（H100-80GB，功耗核算口径 700W）}$$</p>
+<p>这个 700W 是 Meta 说明里的<strong>功率核算口径</strong>（接近 GPU 峰值功率容量，并经过 PUE 调整），不是逐秒采样的实测功耗；用它乘以 GPU 小时数，得到的是一个<strong>推算值</strong>，不是电表读数：</p>
+<p>$$1.3 \times 10^6 \times 0.7 \text{ kW} = 910{,}000 \text{ kWh} = \textbf{0.91 GWh（推算值）}$$</p>
+<p>Meta 披露的碳排放估算：</p>
+<p>$$\textbf{390 tCO}_2\text{eq}$$</p>
+<p>三者的准确定位是：<strong>1.3M GPU 小时是 Meta 直接披露的数字；910 MWh 是按 Meta 给出的功率核算口径推算出来的；390 tCO₂eq 是 Meta 自己给出的排放估算</strong>，这三者不能都笼统地叫&quot;实际/实测用电&quot;。</p>
 <h3>理论 FLOPs 与 GPU 小时的连接</h3>
 <p>把理论训练 FLOPs 除以总 GPU 秒数，得到每张 GPU 的端到端有效吞吐：</p>
-$$\frac{7.23 \times 10^{23}}{1.3 \times 10^6 \times 3600} \approx 1.54 \times 10^{14} \text{ FLOP/s/GPU} = \textbf{154 TFLOP/s}$$
-<p>H100 SXM5 的 BF16 Dense（无稀疏）峰值为 <strong>989 TFLOP/s</strong>（注意：494 TFLOP/s 是 TF32 Dense 的值，BF16 Dense 是其两倍），因此端到端模型浮点利用率（MFU）约：</p>
-$$\text{MFU} = \frac{154}{989} \approx \textbf{15.6\%}$$
-
-<div class="tip-box">
-<div class="tip-title">小知识点：MFU 为什么"只有" 15.6%？其余 84.4% 去哪了？</div>
-<p>15.6% MFU 在大规模分布式训练中属于正常水平（理论峰值很难接近）。GPT-4 训练据报道约 30-38% MFU，但那是在专为训练优化的超大规模集群上。LLaMA-3 8B 的实际 MFU 偏低反映了分布式开销的普遍损耗：</p>
+<p>$$\frac{7.23 \times 10^{23}}{1.3 \times 10^6 \times 3600} \approx 1.54 \times 10^{14} \text{ FLOP/s/GPU} = \textbf{154 TFLOP/s}$$</p>
+<p>H100 SXM5 的 BF16 Dense（无稀疏）峰值为 <strong>989 TFLOP/s</strong>（注意：494 TFLOP/s 是 TF32 Dense 的值，BF16 Dense 是其两倍），因此可以估算出一个端到端模型浮点利用率：</p>
+<p>$$\text{MFU}_\text{估算} = \frac{154}{989} \approx \textbf{15.6\%}$$</p>
+<p><strong>这个 15.6% 需要理解为&quot;基于近似输入反推出的估算值&quot;，不是精确测量到的 MFU</strong>：15T+ token 是一个大致数字（不是精确的训练 token 总数），1.3M GPU 小时本身也是约数，$6NT$ 只是训练 FLOPs 的粗略经验模型——它忽略了 attention 二次项（这会让 $6NT$ 偏低），同时把 $N$ 里约 5.25 亿参数的 Token Embedding 查表也当成了参与矩阵乘法的参数（这会让 $6NT$ 偏高约 6.5%）。<strong>这两个误差方向相反，净效应不能只看其中一个</strong>——上面&quot;系数 6 是怎么来的&quot;一节用本文自己的参数重新拼过一遍，扣掉 Embedding 查表、补上 attention 二次项后，总 FLOPs 按两种口径分别是 $C_\text{model,\ causal}\approx7.72\times10^{23}$、$C_\text{dense-kernel}\approx8.69\times10^{23}$，都比简化 $6NT$ 的 $7.23\times10^{23}$ 更大，说明净效应更可能是<strong>低估</strong>而不是高估。如果用这两套更细致的 FLOPs 分别重新反推 MFU（GPU 小时数不变，仍是 1.3M）：</p>
+<p>$$\text{MFU}_\text{model,\ causal}\approx\frac{164.97\text{ TFLOP/s}}{989\text{ TFLOP/s}}\approx16.7\%\qquad\text{利用率}_\text{dense-kernel}\approx\frac{185.62\text{ TFLOP/s}}{989\text{ TFLOP/s}}\approx18.8\%$$</p>
+<p><strong>这两个百分比是两种不同 FLOPs 口径分别算出的数字，并列展示，不是同一个 MFU 的置信区间上下界，不能都叫 MFU</strong>：</p>
+<ul>
+<li><strong>16.7%</strong>（对应 causal 减半口径 $7.72\times10^{23}$）：分子更接近标准意义上&quot;模型 FLOPs&quot;的定义（因果模型语义上必需的有效运算），可以合理称为<strong>模型 FLOPs 口径下的 MFU 估计</strong>。</li>
+<li><strong>18.8%</strong>（对应完整稠密 $S^2$ 口径 $8.69\times10^{23}$）：分子里包含了某些未做 causal 优化的 kernel 可能额外执行的 masked 区域，这部分不是模型定义所必需的运算——<strong>这个数字更准确地说不应该叫 MFU</strong>，MFU 的分子按惯例应该用事先约定好的、不随 kernel 实现变化的&quot;模型 FLOPs&quot;；如果换一个支持 causal 稀疏计算的 kernel，分子就应该缩小到 16.7% 对应的水平，模型本身并没有变。18.8% 更接近某种<strong>&quot;假设 kernel 完整计算 $S^2$ 时，已统计部分硬件执行 FLOPs 除以峰值算力&quot;的利用率</strong>，方向上更接近 HFU（Hardware FLOPs Utilization）式的口径，但也<strong>不是完整的 HFU</strong>——因为分子仍然没有计入梯度检查点重算、优化器更新、通信等其他硬件实际执行的浮点运算。更准确的三层说法是：15.6% 是传统简化 $6NT$ 定义下的 MFU 估算；16.7% 是本文细化 causal 模型 FLOPs 后的 MFU 估算；18.8% 是一种偏 HFU 方向、但仍不完整的硬件利用率参考数字，不宜继续称为&quot;MFU&quot;。<strong>需要纠正一点</strong>：LM Head 是真正的稠密矩阵乘法，$N=8.03\text{B}$ 里已经包含了它，不能说 $6NT$ &quot;忽略了词表投影&quot;——真正不够精确的地方是把 Embedding 查表也算成了矩阵乘法，不是漏算了 LM Head。</li>
+</ul>
+<hr />
+<p><strong>小知识点：15.6% 这个估算值为什么偏低？其余部分可能去哪了？</strong></p>
+<p>15.6% 这个量级在大规模分布式训练中并不罕见（理论峰值很难接近）。网上有说法称 GPT-4 训练达到约 30～38% MFU，但这不是 OpenAI 官方披露的数字，缺乏第一方技术来源，本文只把它当作非官方估计，不作为确定的对照基准。LLaMA-3 8B 这个估算值偏低，可能反映了分布式训练中常见的几类开销——但由于没有 Meta 公开的性能剖析数据，下表只能列出<strong>可能的开销来源</strong>，无法给出&quot;剩余部分具体如何分配到各项&quot;这样的精确归因：</p>
 <table>
-<thead><tr><th>开销来源</th><th>说明</th></tr></thead>
+<thead>
+<tr>
+  <th>可能的开销来源</th>
+  <th>说明</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>数据并行通信</td><td>AllReduce 同步梯度期间 GPU 算力空闲</td></tr>
-<tr><td>流水线气泡</td><td>流水线并行边界的 bubble 时间</td></tr>
-<tr><td>梯度检查点重算</td><td>为节省显存，部分前向激活被重新计算</td></tr>
-<tr><td>优化器更新</td><td>Adam 的一阶/二阶矩更新消耗显存带宽</td></tr>
-<tr><td>训练不稳定/重启</td><td>loss spike 回滚浪费计算</td></tr>
-<tr><td>内核调度开销</td><td>CPU 发 CUDA kernel 的延迟</td></tr>
+<tr>
+  <td>数据并行通信</td>
+  <td>AllReduce 同步梯度期间 GPU 算力可能空闲</td>
+</tr>
+<tr>
+  <td>流水线气泡</td>
+  <td>流水线并行边界的 bubble 时间</td>
+</tr>
+<tr>
+  <td>梯度检查点重算</td>
+  <td>为节省显存，部分前向激活可能被重新计算</td>
+</tr>
+<tr>
+  <td>优化器更新</td>
+  <td>Adam 的一阶/二阶矩更新消耗显存带宽</td>
+</tr>
+<tr>
+  <td>训练不稳定/重启</td>
+  <td>loss spike 回滚可能浪费计算</td>
+</tr>
+<tr>
+  <td>内核调度开销</td>
+  <td>CPU 发 CUDA kernel 的延迟</td>
+</tr>
 </tbody>
 </table>
-<p><strong>直觉</strong>：这 15.6% 就像工厂的实际产能利用率——采购了 100% 的产能，真正有效生产的时间只有约 15.6%，其余是换模具（通信同步）、设备维护（梯度检查点）和工人换班（内核调度）的时间。</p>
-</div>
-
+<p><strong>直觉</strong>：可以把这个估算值类比成工厂的产能利用率——采购了 100% 的产能，估算出来真正用上的部分只有约 15.6%，差额可能来自换模具（通信同步）、设备维护（梯度检查点）、工人换班（内核调度）等各种环节，但具体每一项占多少，仅凭本文这些近似输入无法精确拆分。</p>
 <h3>完整换算链条</h3>
+<p><strong>需要说明这条链条的性质</strong>：上面的 15.6% 本身就是拿 1.3M GPU 小时反推出来的（$\text{MFU}_\text{估算}=6NT\div(\text{GPU秒数}\times\text{峰值算力})$）。如果下面这条链条又用这个 15.6% 去&quot;预测&quot;GPU 小时数，本质上只是把同一个式子反过来算一遍，会原样得到 1.3M GPU 小时——这是一个<strong>代数恒等式</strong>，不是独立的验证或额外证据。这条链条更准确的用法是分两种情况：</p>
+<ul>
+<li><strong>已知 GPU 小时数</strong>（比如 Meta 披露的 1.3M）：可以反推出隐含的 MFU 估算值（15.6%），这是本文实际做的事情。</li>
+<li><strong>已知一个独立测得或假设的 MFU</strong>（比如从其他来源单独获得的性能剖析数据）：才可以反过来预测 GPU 小时数，这时才是真正的独立预测，而不是循环验证。</li>
+</ul>
+<p>下面这条链条数学上没有错，但如果直接拿本文自己推出的 15.6% 往下算，只是在验证内部自洽性，不能当作对 GPU 小时数的独立验证：</p>
 <pre><code>训练 token 数 T × 参数量 N × 6
    = 理论训练 FLOPs
    ÷ H100 BF16 Dense 峰值（~989 TFLOP/s）
-   ÷ MFU（~15.6%）
+   ÷ MFU（~15.6%，注意：这个数字本身就是从下面要算的 GPU 小时数反推出来的，此处代入只是展示代数关系自洽，不是独立验证）
    = 实际 GPU 秒数
    ÷ 3600
-   = 实际 GPU 小时数
+   = 实际 GPU 小时数（会原样得到 1.3M，因为这是同一个式子的反向代入）
    × GPU 功耗（0.7 kW）
    = 总电能（kWh）
    × 电网碳强度（kg CO₂/kWh）
-   = 碳排放</code></pre>
-
+   = 碳排放
+</code></pre>
 <h3>LLaMA-3 8B vs GPT-3 训练能耗对比</h3>
 <table>
-<thead><tr><th></th><th>GPT-3 175B</th><th>LLaMA-3 8B</th></tr></thead>
+<thead>
+<tr>
+  <th></th>
+  <th>GPT-3 175B</th>
+  <th>LLaMA-3 8B</th>
+</tr>
+</thead>
 <tbody>
-<tr><td>训练 token 数</td><td>3,000 亿</td><td>15 万亿（50× 更多）</td></tr>
-<tr><td>参数量</td><td>1,750 亿</td><td>80.3 亿（1/22）</td></tr>
-<tr><td>理论训练 FLOPs</td><td>$\approx 3.1 \times 10^{23}$</td><td>$\approx 7.2 \times 10^{23}$（2.3× 更多）</td></tr>
-<tr><td>实测用电</td><td>1,287 MWh</td><td>910 MWh</td></tr>
-<tr><td>碳排放</td><td>550 tCO₂eq</td><td>390 tCO₂eq</td></tr>
+<tr>
+  <td>训练 token 数</td>
+  <td>3,000 亿</td>
+  <td>15 万亿（50× 更多）</td>
+</tr>
+<tr>
+  <td>参数量</td>
+  <td>1,750 亿</td>
+  <td>80.3 亿（1/22）</td>
+</tr>
+<tr>
+  <td>理论训练 FLOPs（传统 $6NT$ 口径，两侧统一近似）</td>
+  <td>$\approx 3.14 \times 10^{23}$</td>
+  <td>$\approx 7.23 \times 10^{23}$（2.3× 更多）</td>
+</tr>
+<tr>
+  <td>用电（估算值，统计口径不完全相同）</td>
+  <td>1,287 MWh</td>
+  <td>910 MWh</td>
+</tr>
+<tr>
+  <td>碳排放（各自论文/公司披露的估算）</td>
+  <td>550 tCO₂eq</td>
+  <td>390 tCO₂eq</td>
+</tr>
 </tbody>
 </table>
-<p>LLaMA-3 8B 的参数量是 GPT-3 的 1/22，但训练 token 多 50 倍，总计算量反而更大。更小的模型 + 更多的数据——这是 Chinchilla 定律（Hoffmann et al., 2022）在工程上的体现：给定算力预算，缩小模型规模、增加训练数据，能取得更好的效率。</p>
-
+<p>这两行数字都不是电表读数，而是各自根据不同来源、不同功率核算口径推算出来的估算值（GPT-3 那一行来自 Patterson 等人的论文，LLaMA-3 这一行来自 Meta 的功率核算口径），统计边界和估算方法并不完全一致，1287 与 910 的对比只能作为粗略参考，不宜直接下强结论。</p>
+<p>FLOPs 这一行也需要说明口径：表中两个数字用的都是最简化的传统 $6NT$ 近似（两侧口径统一，可以直接比出 2.3×）。如果换成本文&quot;系数 6 是怎么来的&quot;一节给 LLaMA-3 算出的两个细化并列结果（$C_\text{model,\ causal}\approx7.72\times10^{23}$、$C_\text{dense-kernel}\approx8.69\times10^{23}$，扣掉 Embedding 查表、补上 attention 二次项），再拿去和 GPT-3 的 $3.14\times10^{23}$（仍是简化 $6NT$ 口径，没有做同样的细化）相比，比值会分别变成约 <strong>2.46 倍、2.77 倍</strong>——这两个数字更大，不是因为 LLaMA-3 训练量真的多了这么多，而是因为分子分母用了不同精细程度的 FLOPs 定义，不能直接当作比 2.3× 更准确的答案。<strong>这里需要提醒</strong>：这两个比值本身分析价值有限，只有两侧用同一种口径（都简化，或都细化）时比较才成立，脱离这个限定条件单独引用&quot;2.46～2.77 倍&quot;容易造成误导，不建议在没有上下文的情况下单独引用这两个数字。</p>
+<p>LLaMA-3 8B 的参数量是 GPT-3 的 1/22，但训练 token 多 50 倍，总计算量反而更大。<strong>这里需要纠正一个常见的误解</strong>：这不是&quot;Chinchilla 定律的体现&quot;。Chinchilla 定律（Hoffmann et al., 2022）的核心结论是：在给定算力预算下，模型参数量和训练 token 数应该按相近的速率一起扩展，存在一个大致 20 token/参数 的<strong>计算最优比例</strong>（比如 Chinchilla 70B 用了约 1.4T token，约 20 token/参数）——不是&quot;模型越小、数据越多越好&quot;。</p>
+<p>LLaMA-3 8B 用了 15T+ token，按 8.03B 参数算，约合 <strong>1868 token/参数</strong>，是 Chinchilla 计算最优比例（约 20 token/参数）的近 100 倍，说明 LLaMA-3 8B 的训练策略是<strong>主动大幅偏离 Chinchilla 计算最优点</strong>，而不是在实践这条定律。更准确的解释是：为了降低<strong>部署阶段</strong>的推理成本（更小的模型意味着更低的推理延迟和显存占用），Meta 在<strong>训练阶段</strong>投入远超计算最优比例的算力去训练一个相对更小的模型——这是在推理成本约束下做的工程权衡。需要说明两点：一是公开数据并不能证明训练已经&quot;接近数据饱和&quot;，这里不做这个断言；二是这不是&quot;和 Chinchilla 结论相反&quot;，而是<strong>优化目标不同</strong>——Chinchilla 研究的问题是&quot;给定训练算力预算，如何分配模型规模和数据量以最小化训练损失&quot;，而 LLaMA-3 8B 的选择是同时考虑训练成本和长期的推理/部署成本，因此主动偏离了单纯的训练计算最优点，两者是在回答不同的问题，不是同一个问题下的相反结论。</p>
 <hr />
-
 <h2 id="sec9">九、反向传播与训练机理</h2>
 <p>本章沿着前向传播的同一条链路倒着计算梯度，说明训练代码中 <code>loss.backward()</code> 实际完成了什么。数值例子复用配套文档《LLaMA-3-8B现代LLM架构计算规模与能耗》中的 toy GQA 模型（8 个 Query head、2 个 KV head、<code>head_dim=2</code>、<code>d_model=16</code>，token 为“机器／学习／很／有趣”），便于在同一组 Q／K／V／softmax 数值上验证反向结果。</p>
 <h3>9.0 两条贯穿全文的规则</h3>
@@ -1292,12 +1672,42 @@ print(&quot;manual  :&quot;, manual)   # 两者应该一致
 <blockquote>
 <p>LLaMA-3 8B 的反向传播 = 交叉熵梯度 $p-y$ 从 logits 出发，经过 LM Head、Final RMSNorm、32 层 Block（每层：残差直通 + SwiGLU 反向（gate/up 分支梯度相加）+ RMSNorm 反向 + 注意力反向（O 投影 → concat 拆分 → 对 V 加权求和反向【dV 在此按 GQA 共享关系 + 跨 query token 累加】→ softmax 反向 → $QK^\top$ 反向得到 dQ、dK【dK 同样在此按 GQA + 跨 token 累加，不是放在 RoPE 之后才统一累加】→ RoPE 反向旋转回去 → Q/K/V 投影反向）+ 残差直通 + RMSNorm 反向），最终得到 Embedding 表的梯度（数据梯度按行稀疏，实际是否稀疏更新取决于框架实现）。核心是链式法则加&quot;分支相加&quot;这一条规则；GQA、SwiGLU、残差连接这三处设计在反向传播里都体现为&quot;一个变量的梯度等于它在前向中各个去处传回来的梯度之和&quot;。手推公式建立理解，<code>torch.autograd</code> 校验正确性，是从&quot;看懂训练机理&quot;走到&quot;能写训练代码&quot;最实际的路径。</p>
 </blockquote>
-<hr />
-
 <h2 id="sec10">十、总结</h2>
 <blockquote>
-<p><strong>LLaMA-3 8B 在 GPT-3 架构基础上做了四项关键改进：Pre-RMSNorm 让深层训练更稳定（去掉均值计算和偏置，Pre-Norm 顺序让梯度有直通路径）；GQA 把 KV Cache 从 MHA 的 4 GB（8K 上下文）压到 1 GB（降为 1/4），推理吞吐因此大幅提升；RoPE 把位置旋转进 Q/K 点积，天然表达相对距离并支持长上下文扩展，$\theta_\text{base}=500{,}000$ 是为 8K 上下文把旋转速度放慢 50 倍；SwiGLU 给 FFN 加了动态门控分支，用三次矩阵乘法换来更强的特征选择能力，中间维度 14336 是 Meta 实验选出的经验最优值（$= 112 \times 128$，非参数对齐直接推导）。训练了 15T+ token 后总计算量约 $7.23\times10^{23}$ FLOPs，Meta 披露实际用电约 910 MWh、碳排放 390 tCO₂eq，端到端 MFU 约 15.6%（以 H100 BF16 Dense 989 TFLOP/s 为基准）。</strong></p>
+<p><strong>LLaMA-3 8B 在 GPT-3 架构基础上做了四项关键改进</strong>，以下按类别分述，避免把架构、FLOPs 口径、利用率数字、能耗数据混在一段里：</p>
 </blockquote>
+<p><strong>架构改进（四项）</strong></p>
+<ul>
+<li><strong>Pre-RMSNorm</strong>：去掉均值计算和偏置，Pre-Norm 顺序让梯度有直通路径，深层训练更稳定。</li>
+<li><strong>GQA</strong>：把 KV Cache 从&quot;假想的同宽度（4096 维、32 头）MHA 版本&quot;的 4 GiB（8K 上下文）压到 1 GiB（降为 1/4——这个对比基准是同宽度的假想 MHA，不是 GPT-3 实际的 96 头/12288 维/96 层配置），有助于提高可并发的 batch 规模和推理吞吐（具体提升幅度还取决于 batch size、显存带宽、attention kernel 实现等因素）。</li>
+<li><strong>RoPE</strong>：把位置旋转进 Q/K 点积，天然表达相对距离并支持长上下文扩展。$\theta_\text{base}=500{,}000$ 的一个合理解释（本文的机理推断，不是已证实的官方设计记录）是拉长部分中频维度对的旋转周期，使其在 8K 上下文里保持不完整绕圈（放慢倍数按 $50^{i/64}$ 逐维度变化，从 1 倍到约 47 倍不等，不是所有维度统一或等比例放慢）。</li>
+<li><strong>SwiGLU</strong>：给 FFN 加了动态门控分支，用三次矩阵乘法换来更强的特征选择能力；中间维度 14336 可以由 Meta 公开代码里 $\lceil(8d/3\times1.3)/1024\rceil\times1024$（$d=4096$）这个公式精确算出来，不是无来源的&quot;消融实验最优值&quot;。</li>
+</ul>
+<p><strong>训练 FLOPs：三套并列口径，不是同一个量的区间</strong></p>
+<ul>
+<li><strong>传统简化 $6NT$</strong>：按 15T 这个基准值代入，约 $7.23\times10^{23}$ FLOPs（真实训练 token 数是&quot;15T+&quot;，超出 15T 的部分会使这个数字相应更大；$6NT$ 本身把 Embedding 查表参数当作参与矩阵乘法，带来约 6.5% 的高估，但同时完全没计入 attention 的 $QK^\top$、$\alpha V$ 二次项，这个遗漏量级更大）。</li>
+<li><strong>$C_\text{model,\ causal}\approx7.72\times10^{23}$</strong>：扣掉 Embedding 查表、补上 attention 二次项（causal 减半口径）后的细化模型 FLOPs。</li>
+<li><strong>$C_\text{dense-kernel}\approx8.69\times10^{23}$</strong>：同样扣掉 Embedding、补上 attention 二次项，但 attention 按完整稠密 $S^2$ 记账（对应某些未做 causal 优化的 kernel 可能实际执行的量）。</li>
+</ul>
+<p>后两者都比 $7.23\times10^{23}$ 更大，说明 Embedding 高估和 attention 二次项遗漏这两处误差抵消后，净效应更可能是<strong>低估</strong>而非高估；后两个数字是两种不同记账口径，不是同一个量的置信区间上下界，也都不是&quot;真实 FLOPs&quot;——依然没有计入真实序列长度分布/打包、梯度检查点重算、被丢弃的训练步等因素，且隐含了训练序列有效长度接近 8192 这个假设。</p>
+<p><strong>端到端利用率：对应上面三套 FLOPs 口径的三个数字，不是同一个 MFU 的置信区间</strong></p>
+<ul>
+<li>按简化 $6NT$：约 <strong>15.6%</strong>——可以合理称为 MFU。</li>
+<li>按 $C_\text{model,\ causal}$：约 <strong>16.7%</strong>——同样可以合理称为 MFU。</li>
+<li>按 $C_\text{dense-kernel}$：约 <strong>18.8%</strong>——这个数字<strong>不应该继续叫 MFU</strong>，因为分子混入了某些未做 causal 优化的 kernel 可能额外执行的 masked 区域，更接近一种偏 HFU 方向、但仍不完整（未计入梯度检查点重算、优化器更新等）的硬件利用率参考数字。</li>
+</ul>
+<p><strong>能耗与碳排放（均为 Meta 披露/推算数字，非电表读数）</strong></p>
+<p>Meta 披露的预训练计算是 1.3M GPU 小时（H100，700W 功耗核算口径），据此推算约 910 MWh 用电；Meta 披露碳排放约 390 tCO₂eq。</p>
+<hr />
+<h3>参考文献</h3>
+<ul>
+<li>Zhang, B. &amp; Sennrich, R. (2019). <em>Root Mean Square Layer Normalization</em>. <a href="https://arxiv.org/abs/1910.07467">arXiv:1910.07467</a></li>
+<li>Su, J. et al. (2021). <em>RoFormer: Enhanced Transformer with Rotary Position Embedding</em>. <a href="https://arxiv.org/abs/2104.09864">arXiv:2104.09864</a></li>
+<li>Ainslie, J. et al. (2023). <em>GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints</em>. <a href="https://arxiv.org/abs/2305.13245">arXiv:2305.13245</a></li>
+<li>Shazeer, N. (2020). <em>GLU Variants Improve Transformer</em>. <a href="https://arxiv.org/abs/2002.05202">arXiv:2002.05202</a></li>
+<li>Hoffmann, J. et al. (2022). <em>Training Compute-Optimal Large Language Models</em>（Chinchilla）. <a href="https://arxiv.org/abs/2203.15556">arXiv:2203.15556</a></li>
+<li>Meta (2024). <em>Llama 3 Model Card</em>. <a href="https://github.com/meta-llama/llama3/blob/main/MODEL_CARD.md">github.com/meta-llama/llama3/blob/main/MODEL_CARD.md</a></li>
+</ul>
 
 </div>
 </body>
