@@ -58,6 +58,7 @@
   }
   h3 { font-size: 1.15rem; font-weight: 600; color: var(--accent2); margin: 1.8rem 0 0.6rem; }
   h4 { font-size: 1rem; font-weight: 600; color: var(--yellow); margin: 1.4rem 0 0.4rem; }
+  h5 { font-size: 0.95rem; font-weight: 600; color: var(--green); margin: 1.2rem 0 0.35rem; }
   p { margin: 0.7rem 0; }
   blockquote {
     border-left: 3px solid var(--green);
@@ -90,77 +91,161 @@
   li { margin: 0.3rem 0; }
   strong { color: #fff; }
   .katex-display { overflow-x: auto; padding: 0.4rem 0; }
+
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; font-style: italic; }
+  .toc {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.4rem; margin: 1.5rem 0 2rem; font-size: 0.93rem;
+  }
+  .toc-title { color: var(--accent); font-weight: 700; margin-bottom: 0.5rem; }
+  .toc a { color: var(--muted); text-decoration: none; display: block; padding: 0.15rem 0; }
+  .toc a:hover { color: var(--text); }
 </style>
 </head>
 <body>
 <div class="container">
 <nav aria-label="站点导航"><a class="back-link" href="index.html">← 返回文章首页</a></nav>
+
 <h1>GPT-3 计算规模、信息流与能耗</h1>
-<blockquote><p>整合自对话记录与 GPT3.md 文件，涵盖 GPT-3 架构参数、完整前向传播数值演示、各层矩阵运算规模，以及 FLOPs 与电能消耗的关系。</p></blockquote>
+<p class="subtitle">整合自对话记录与 GPT3.md 文件，涵盖 GPT-3 架构参数、完整前向传播数值演示、反向传播与训练机理、各层矩阵运算规模、训练显存与推理缓存，以及 FLOPs 与电能消耗的关系。</p>
+
+<div class="toc">
+  <div class="toc-title">目录</div>
+  <a href="#sec1">一、GPT-3 基本参数（来自 GPT3.md）</a>
+  <a href="#sec2">二、batch_size × 维度：这个乘积意味着什么？</a>
+  <a href="#sec3">三、完整前向传播：用具体数值走一遍</a>
+  <a href="#sec4">四、乘上 Batch Size：真实训练规模</a>
+  <a href="#sec5">五、FLOPs 与电能消耗的关系</a>
+  <a href="#sec6">六、反向传播与训练机理</a>
+  <a href="#sec7">七、总结</a>
+</div>
+
 <hr />
 
-<h2>一、GPT-3 基本参数（来自 GPT3.md）</h2>
-<table><thead><tr><th>参数</th><th>数值</th></tr></thead><tbody>
-<tr><td>模型名称</td><td>GPT-3</td></tr>
-<tr><td>发布机构</td><td>OpenAI</td></tr>
-<tr><td>发布日期</td><td>2020-06-11</td></tr>
-<tr><td>训练 token 数</td><td>3000 亿（$3 \times 10^{11}$）</td></tr>
-<tr><td>词表大小 $|V|$</td><td>50,527</td></tr>
-<tr><td>总参数量</td><td>1750 亿（$1.75 \times 10^{11}$）</td></tr>
-<tr><td>层数</td><td>96</td></tr>
-<tr><td>模型维度 $d_{model}$</td><td>12,288</td></tr>
-<tr><td>注意力头数</td><td>96</td></tr>
-<tr><td>每头维度</td><td>128（= 12288 ÷ 96）</td></tr>
-<tr><td>FFN 中间维度</td><td>49,152（= 12288 × 4）</td></tr>
-<tr><td>Batch size</td><td>3,200,000 tokens</td></tr>
-<tr><td>学习率</td><td>6e-05</td></tr>
-<tr><td>训练硬件</td><td>V100 GPU</td></tr>
-</tbody></table>
+<h2 id="sec1">一、GPT-3 基本参数（来自 GPT3.md）</h2>
+<table>
+<thead>
+<tr>
+  <th>参数</th>
+  <th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>模型名称</td>
+  <td>GPT-3</td>
+</tr>
+<tr>
+  <td>发布机构</td>
+  <td>OpenAI</td>
+</tr>
+<tr>
+  <td>发布日期</td>
+  <td>2020-06-11</td>
+</tr>
+<tr>
+  <td>训练 token 数</td>
+  <td>3000 亿（$3 \times 10^{11}$）</td>
+</tr>
+<tr>
+  <td>词表大小 $\|V\|$</td>
+  <td>50,257</td>
+</tr>
+<tr>
+  <td>总参数量</td>
+  <td>1750 亿（$1.75 \times 10^{11}$）</td>
+</tr>
+<tr>
+  <td>层数</td>
+  <td>96</td>
+</tr>
+<tr>
+  <td>模型维度 $d_{model}$</td>
+  <td>12,288</td>
+</tr>
+<tr>
+  <td>注意力头数</td>
+  <td>96</td>
+</tr>
+<tr>
+  <td>每头维度</td>
+  <td>128（= 12288 ÷ 96）</td>
+</tr>
+<tr>
+  <td>FFN 中间维度</td>
+  <td>49,152（= 12288 × 4）</td>
+</tr>
+<tr>
+  <td>Batch size（完整/最终 global batch size，训练早期会从 32K 逐步爬升到这个值）</td>
+  <td>3,200,000 tokens</td>
+</tr>
+<tr>
+  <td>学习率</td>
+  <td>6e-05</td>
+</tr>
+<tr>
+  <td>训练硬件</td>
+  <td>V100 GPU</td>
+</tr>
+</tbody>
+</table>
 <hr />
-
-<h2>二、batch_size × 维度：这个乘积意味着什么？</h2>
+<h2 id="sec2">二、batch_size × 维度：这个乘积意味着什么？</h2>
 <p>$$3,200,000 \text{ (tokens)} \times 12,288 \text{ (dims)} \approx 3.93 \times 10^{10} \text{ (elements)}$$</p>
 <p>这个乘积体现在三个方面：</p>
 <p><strong>1. 显存压力</strong></p>
-<p>使用 FP16（每个数占 2 字节），仅存储一层的激活值就需要：</p>
+<p>使用 FP16（每个数占 2 字节），仅存储<strong>一个</strong> $[T,d]$ 形状的激活张量（比如某一层输出的隐藏状态）就需要：</p>
 <p>$$3.2 \times 10^6 \times 12288 \times 2 \text{ 字节} \approx \textbf{78.6 GB}$$</p>
-<p>一张 H100（80GB 显存）几乎被一层的中间结果撑满。这直接决定了模型必须使用张量并行或数据并行，将 320 万个 token 分散到成百上千块显卡上。</p>
-<p><strong>2. 矩阵乘法的规模</strong></p>
-<p>每一层的核心运算 $Y = XW$：</p>
+<p>这只是一份 $[T,d]$ 张量的大小，不是&quot;一层&quot;要保存的全部激活——一层实际还有 Q/K/V、注意力中间量、FFN 里 $4d$ 维的中间激活、每次归一化的输入等，真正训练时全部加起来远不止 78.6GB（用梯度检查点可以少存一些，代价是反向时要重算）。即便只看这一份 78.6GB，一张 H100（80GB 显存）也几乎被撑满，这也是为什么大模型训练要靠数据并行（把 320 万个 token 按 batch 维切开、分给不同 GPU）、序列并行、流水线并行等多种并行方式配合，把总激活量摊到多张显卡上——张量并行切分的主要是权重矩阵和隐藏维度，不是直接把 token 这一维切开分配，不能笼统地说&quot;用张量并行分散 320 万个 token&quot;。</p>
+<p><strong>2. 矩阵乘法的规模（等价总运算量口径，不是真实执行时的单次 GEMM 形状）</strong></p>
+<p>每一层的核心运算 $Y = XW$，把全部 320 万个 token <strong>展平成一个等价的整体运算量</strong>来看：</p>
 <ul>
-<li>输入 $X$：$[3,200,000,\ 12,288]$（极其"高瘦"的矩阵，每行代表一个 token）</li>
+<li>输入 $X$：$[3,200,000,\ 12,288]$（极其&quot;高瘦&quot;的矩阵，每行代表一个 token）</li>
 <li>权重 $W$：$[12,288,\ 12,288]$（方阵）</li>
 <li>输出 $Y$：$[3,200,000,\ 12,288]$</li>
 </ul>
+<p><strong>需要说明</strong>：真实训练里不会有哪张 GPU 真的执行一次输入 320 万行的单次 GEMM——3.2M 是全局/有效 batch size，实际会被拆到多个数据并行副本、每张 GPU 的局部 batch、多个 microbatch（可能还叠加梯度累积），张量并行下权重矩阵和隐藏维度还会被切分到不同 GPU，流水线并行则把不同层分配到不同 GPU（GPT-3 论文本身也提到模型是沿深度和宽度分布到多张 GPU 上的）。上面这个 $[3.2\text{M},12288]$ 只是&quot;把所有 token 展平后的等价总运算量&quot;表示，用来算 $2Tmn$ 这个总 FLOPs 是没问题的，但不能理解成&quot;训练时真的有一次矩阵乘法的实际输入形状就是这样&quot;。</p>
 <p><strong>3. 梯度下降的平滑度</strong></p>
-<p>320 万个 token 的梯度平均，统计信息足够丰富，支撑模型使用较大学习率（6e-05）而不崩溃。</p>
+<p>320 万个 token 的梯度平均，统计信息更丰富、梯度噪声更小；对于<strong>固定模型规模</strong>，这确实是大 batch 有时能配合更大学习率的原因之一。<strong>但这里不适合把&quot;3.2M 大 batch&quot;和&quot;6e-05&quot;直接当成这条一般规律在 GPT-3 上的体现</strong>：GPT-3 论文 Table 2.1 列出了从 1.25 亿到 1,750 亿参数的 8 个模型，趋势是<strong>模型越大，batch size 越大、但学习率反而越小</strong>——175B 这个模型在 8 个模型里 batch size 最大（3.2M），学习率却是这组里<strong>最小</strong>的（6e-05），不是&quot;较大学习率&quot;。更准确的理解是：大模型通常需要更大的 batch（配合更小的学习率）来维持训练稳定，两者是模型规模增大后<strong>同时</strong>出现的变化，不是&quot;batch 变大→学习率也跟着变大&quot;这样的因果关系；训练稳不稳定也不只由 batch size 决定，还依赖优化器选择（比如 Adam 的自适应缩放）、learning rate warmup、梯度裁剪，以及训练所处的阶段。</p>
 <hr />
-
-<h2>三、完整前向传播：用具体数值走一遍</h2>
-<blockquote><p>先追踪 <strong>1 个 token</strong>，感受形状；最后乘以 batch size 感受总规模。</p></blockquote>
-
+<h2 id="sec3">三、完整前向传播：用具体数值走一遍</h2>
+<blockquote>
+<p>先追踪 <strong>1 个 token</strong>，感受形状；最后乘以 batch size 感受总规模。</p>
+</blockquote>
 <h3>第一步：Embedding 查表</h3>
-<p>$$E \text{ 的形状} = [50527,\ 12288] \quad \text{参数量} = 50527 \times 12288 = \textbf{6.2 亿}$$</p>
-<p>取出第 42 行，得到初始向量：$x_0 \text{ 的形状} = [1,\ 12288]$</p>
+<p>$$E \text{ 的形状} = [50257,\ 12288] \quad \text{参数量} = 50257 \times 12288 = \textbf{6.176 亿}$$</p>
+<p>取出第 42 行，得到初始向量：</p>
+<p>$$x_0 \text{ 的形状} = [1,\ 12288]$$</p>
 <p>加位置编码（形状不变）：</p>
-<p>$$x_0 = \text{Embedding} + \text{PositionalEncoding} \quad [1,\ 12288]$$</p>
+<p>$$x_0 = \text{Embedding} + \text{Learned Positional Embedding（学习式位置嵌入）} \quad [1,\ 12288]$$</p>
+<p>（GPT-3 用的是<strong>学习式</strong>位置嵌入——一张 $[\text{上下文长度}, 12288]$ 的可训练表，按位置索引查表，不是 Transformer 原论文里固定的正余弦位置编码。）</p>
 <hr />
-
 <h3>第二步：一层 Transformer Block 的完整计算</h3>
 <h4>Layer Norm</h4>
 <p>形状不变：$[1,\ 12288] \rightarrow [1,\ 12288]$</p>
-<p>这里的 Layer Norm 不是矩阵乘法，而是对当前 token 的 12288 维隐藏向量做归一化。假设当前 token 的向量是 $x = [x_1, x_2, \dots, x_{12288}]$。</p>
-<p>先计算平均值：</p>
-<p>$$\mu = \frac{1}{d}\sum_{i=1}^{d} x_i$$</p>
+<p>这里的 Layer Norm 不是矩阵乘法，而是对当前 token 的 12288 维隐藏向量做归一化。</p>
+<p>假设当前 token 的向量是：</p>
+<p>$$x = [x_1, x_2, \dots, x_{12288}]$$</p>
+<p>先计算这 12288 个数的平均值：</p>
+<p>$$
+\mu = \frac{1}{d}\sum_{i=1}^{d} x_i
+$$</p>
 <p>再计算方差：</p>
-<p>$$\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2$$</p>
-<p>然后标准化：</p>
-<p>$$\hat{x}_i = \frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}$$</p>
-<p>最后乘上可训练的缩放参数 $\gamma_i$，加上平移参数 $\beta_i$：</p>
-<p>$$y_i = \gamma_i \hat{x}_i + \beta_i$$</p>
-<p>其中 $d=12288$，$\epsilon$ 防止除以 0，$\gamma$ 和 $\beta$ 的形状都是 $[12288]$。</p>
-
-<h4>Multi-Head Attention：4 次大矩阵乘法</h4>
+<p>$$
+\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2
+$$</p>
+<p>然后把每一维标准化：</p>
+<p>$$
+\hat{x}_i = \frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}
+$$</p>
+<p>最后再乘上可训练的缩放参数 $\gamma_i$，加上可训练的平移参数 $\beta_i$：</p>
+<p>$$
+y_i = \gamma_i \hat{x}_i + \beta_i
+$$</p>
+<p>其中 $d=12288$，$\epsilon$ 是一个很小的数，用来防止除以 0。$\gamma$ 和 $\beta$ 的形状都是 $[12288]$。</p>
+<p>直观理解：Layer Norm 先把一个 token 的 12288 个特征值 $\hat x$ 拉到大致均值为 0、方差为 1 的稳定范围；严格说这个&quot;均值0方差1&quot;说的是标准化后的 $\hat x$，不是加上可训练的 $\gamma,\beta$ 之后的最终输出 $y$——训练中 $\gamma,\beta$ 可以让 $y$ 的均值和方差偏离 0 和 1，这是模型学习到的缩放/平移，不影响标准化这一步本身的作用。$y$ 才是真正交给 Attention 或 FFN 继续计算的量。</p>
+<h4>Multi-Head Attention：4 次带参数的投影矩阵乘法，外加注意力内部的 $QK^\top$ 和 $AV$</h4>
+<p>这里说的&quot;4 次&quot;专指 $XW_Q,XW_K,XW_V,HW_O$ 这四个<strong>带参数</strong>的线性投影；除此之外，Attention 内部还有 $QK^\top$（算得分）和 $AV$（加权求和）两类矩阵乘法——它们不涉及可训练参数，但同样消耗 FLOPs（第四节会把这部分单独算出来）。</p>
 <p><strong>生成 Q、K、V（各一次）：</strong></p>
 <p>$$Q = x \cdot W_Q \quad [1,\ 12288] \times [12288,\ 12288] \rightarrow [1,\ 12288]$$</p>
 <p>$W_Q,\ W_K,\ W_V$ 各有参数量：$12288^2 = \textbf{1.51 亿}$</p>
@@ -168,154 +253,263 @@
 <p>$$[1,\ 12288] \rightarrow \text{96 个头，每头} [1,\ 128]$$</p>
 <p><strong>小知识点：为什么是 96 个头？</strong></p>
 <p>GPT-3 175B 的隐藏维度是 $d_{\text{model}}=12288$，注意力头数是 $n_{\text{heads}}=96$，所以每个头的维度是：</p>
-<p>$$d_{\text{head}}=\frac{d_{\text{model}}}{n_{\text{heads}}}=\frac{12288}{96}=128$$</p>
+<p>$$
+d_{\text{head}}=\frac{d_{\text{model}}}{n_{\text{heads}}}=\frac{12288}{96}=128
+$$</p>
 <p>这里的 96 不是严格数学推导出来的最优值，更像是经验、实验和硬件效率共同作用后的设计选择。实际设计大模型时，常见做法是让每个 head 保持一个比较合适的维度，例如 64 或 128，然后根据总隐藏维度反推头数。</p>
+<p>如果只分成 1 个头：</p>
+<p>$$
+n_{\text{heads}}=1,\quad d_{\text{head}}=12288
+$$</p>
+<p>模型就只有一套注意力分布。它仍然可以计算 $QK^T$，但所有关系都要挤进同一个 attention map 里，表达模式会比较单一。</p>
+<p>如果分成 12288 个头：</p>
+<p>$$
+n_{\text{heads}}=12288,\quad d_{\text{head}}=1
+$$</p>
+<p>每个头只有 1 维，单个头的 query/key 只是一个数字，能表达的相似度太弱。同时会产生大量很小的 softmax 和调度开销，工程效率也会很差。</p>
+<p>所以头数的选择一般是在两边之间找平衡：</p>
 <ul>
 <li>头太少：注意力模式太单一。</li>
 <li>头太多：每个头维度太小，表达力下降，kernel 调度和 softmax 开销变大。</li>
+<li>常见分析方法：固定模型规模做 ablation，对比不同头数的训练 loss、下游任务效果、显存占用、KV cache 成本和 GPU kernel 效率。</li>
 </ul>
 <p>一句话：GPT-3 的 96 个头不是公式证明出的最优解，而是在 $12288$ hidden size 下选择 $128$ head dimension 后得到的工程经验平衡点。</p>
 <p><strong>每头计算注意力得分：</strong></p>
-<p>$$\text{score} = Q_{head}K_{head}^T = [1,128] \times [128,1] = \text{一个标量}$$</p>
-<p>Softmax 后加权求和，每头输出 $[1,\ 128]$，96 头拼接回 $[1,\ 12288]$。</p>
-<blockquote><p><strong>以下展开多头注意力的完整计算细节。</strong></p></blockquote>
+<p>$$\text{score} = Q_{head}K_{head}^T = [1,128] \times [128,1] = \text{一个标量（对某一个 key 而言）}$$</p>
+<p>这只是 query 和<strong>某一个</strong> key 的得分；实际上位置 $i$ 要对它能看到的所有历史位置（$j\le i$，长度为 $i$）各算一次，得到的是一个长度为 $i$ 的得分向量，再整体做 softmax，不是只算一个标量就结束。Softmax 后加权求和，每头输出 $[1,\ 128]$，96 头拼接回 $[1,\ 12288]$。</p>
+<blockquote>
+<p><strong>以下展开多头注意力的完整计算细节。</strong></p>
+</blockquote>
 <hr />
-
-<h4>多头注意力完整计算（以"黑猫睡"为例，计算"睡"的输出）</h4>
+<h4>多头注意力完整计算（以&quot;黑猫睡&quot;为例，计算&quot;睡&quot;的输出）</h4>
 <p><strong>小注解：$q_3$ 里的 3 是什么？</strong></p>
-<p>在例子"黑猫睡"里：$x_1=\text{黑},\quad x_2=\text{猫},\quad x_3=\text{睡}$</p>
-<p>所以 $q_3$ 表示第 3 个 token，也就是"睡"这个位置生成的 query 向量。这里的下标 3 是位置序号，不是第 3 维，也不是第 3 个 attention head。计算"睡"的注意力输出时，会用 $q_3$ 分别和 $k_1,k_2,k_3$ 做相似度计算。因为 GPT 是因果模型，所以第 3 个 token 只能看位置 1、2、3，不能看未来的位置 4、5、...。</p>
-
-<p><strong>教科书公式 8.10～8.14（单头模板）：</strong></p>
-<p>$$\begin{aligned} q_i &= x_i W^Q \\ k_j &= x_j W^K \\ v_j &= x_j W^V \end{aligned} \tag{8.10}$$</p>
+<p>在例子“黑猫睡”里：</p>
+<p>$$
+x_1=\text{黑},\quad x_2=\text{猫},\quad x_3=\text{睡}
+$$</p>
+<p>所以 $q_3$ 表示第 3 个 token，也就是“睡”这个位置生成的 query 向量。这里的下标 3 是位置序号，不是第 3 维，也不是第 3 个 attention head。</p>
+<p>同理，$k_1,v_1$ 来自“黑”，$k_2,v_2$ 来自“猫”，$k_3,v_3$ 来自“睡”。计算“睡”的注意力输出时，会用 $q_3$ 分别和 $k_1,k_2,k_3$ 做相似度计算：</p>
+<p>$$
+q_3k_1^T,\quad q_3k_2^T,\quad q_3k_3^T
+$$</p>
+<p>这表示“睡”这个 token 分别看“黑”“猫”和它自己。因为 GPT 是因果模型，所以第 3 个 token 只能看位置 1、2、3，不能看未来的位置 4、5、...。</p>
+<p><strong>教科书公式 8.10～8.14：</strong></p>
+<p>$$q_i = x_i W^Q \quad k_j = x_j W^K \quad v_j = x_j W^V \tag{8.10}$$</p>
 <p>$$\text{score}(x_i, x_j) = \frac{q_i k_j^T}{\sqrt{d_k}} \tag{8.11}$$</p>
 <p><strong>小知识点：为什么原书写 $q_i \cdot k_j$，工程里常写 $q_i k_j^T$？</strong></p>
 <p>原书里的 $q_i \cdot k_j$ 是向量点积写法，数学上没有问题。点积符号 $\cdot$ 本身就表示两个向量逐维相乘后求和：</p>
-<p>$$q_i \cdot k_j = \sum_{m=1}^{d_k} q_{i,m} k_{j,m}$$</p>
-<p>如果把 $q_i$ 和 $k_j$ 都看成行向量（形状 $[1,d_k]$），要得到一个标量就需要转置：</p>
-<p>$$q_i k_j^T:[1,d_k]\times[d_k,1]\rightarrow[1,1]$$</p>
-<p>所以 $q_i \cdot k_j \equiv q_i k_j^T$，区别只是视角不同——前者是数学内积写法，后者是工程矩阵乘法写法，更容易和代码里的 $QK^T$ 对上。</p>
-<p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \tag{8.12}$$</p>
-<p>其中 $j \leq i$（因果掩码：只对当前及之前的位置计算注意力权重，$j > i$ 时 $\alpha_{ij} = 0$）。</p>
+<p>$$
+q_i \cdot k_j = \sum_{m=1}^{d_k} q_{i,m} k_{j,m}
+$$</p>
+<p>如果从矩阵形状看，把 $q_i$ 和 $k_j$ 都看成行向量：</p>
+<p>$$
+q_i:[1,d_k] \quad k_j:[1,d_k]
+$$</p>
+<p>那么要得到一个注意力分数标量，就需要把 $k_j$ 转置：</p>
+<p>$$
+q_i k_j^T:[1,d_k]\times[d_k,1]\rightarrow[1,1]
+$$</p>
+<p>所以：</p>
+<p>$$
+q_i \cdot k_j \equiv q_i k_j^T
+$$</p>
+<p>区别只是视角不同：$q_i \cdot k_j$ 是数学向量内积写法，$q_i k_j^T$ 是矩阵乘法/工程实现写法，更容易和代码里的 $QK^T$ 对上。真正不严谨的是写成没有点积符号、也没有转置的 $q_i k_j$。</p>
+<p>$$\alpha_{ij} = \text{softmax}(\text{score}(x_i, x_j)) \quad \forall j \leq i \tag{8.12}$$</p>
 <p>$$\text{head}_i = \sum_{j \leq i} \alpha_{ij} v_j \tag{8.13}$$</p>
 <p>$$a_i = \text{head}_i W^O \tag{8.14}$$</p>
-
 <p><strong>正确理解 8.10～8.14：这是一套完整的单头注意力公式</strong></p>
-<p>首先澄清一个容易犯的错误：8.10～8.14 本身量纲完全自洽，不存在任何问题。</p>
+<p>首先澄清一个容易犯的错误：8.10～8.14 本身<strong>量纲</strong>是自洽的（各步骤的张量形状都能对上）。严格来说，(8.12) 的 $\text{softmax}$ 没有像后面 8.12′ 那样显式写出归一化用的分母求和集合，要靠旁边 $\forall j\le i$ 这个条件才能推断出&quot;对哪些位置归一化&quot;；这一点在 8.12′ 里补齐了。所以准确的说法是&quot;量纲没有问题，但归一化范围需要读者从上下文推断，不是公式本身写得完全显式&quot;。</p>
 <p>单头注意力的含义是：用 token 的<strong>全部 $d_{\text{model}}$ 维度</strong>跑一套 QKV 计算，整个 $d_{\text{model}}$ 就是唯一的一个头在处理。此时：</p>
 <p>$$W^Q, W^K, W^V \in \mathbb{R}^{d_{\text{model}} \times d_{\text{model}}}$$</p>
 <p>$$q_i,\ k_j,\ v_j \in \mathbb{R}^{1 \times d_{\text{model}}}$$</p>
 <p>$$\text{head}_i = \sum_{j \le i} \alpha_{ij} v_j \in \mathbb{R}^{1 \times d_{\text{model}}}$$</p>
 <p>$$a_i = \text{head}_i \cdot W^O : [1,\ d_{\text{model}}] \times [d_{\text{model}},\ d_{\text{model}}] \rightarrow [1,\ d_{\text{model}}] \quad \checkmark$$</p>
 <p>量纲完全闭合，不需要任何额外步骤。</p>
-<p>$\text{head}_i$ 里的 $i$ 是 token 位置（$j \le i$ 这个因果掩码就是证据），"head" 只是这个单头输出的名字——作者用 head 命名，是为了和多头场景的语义保持一致（多头里每个头也叫 head）。</p>
+<p><strong>$\text{head}_i$ 里的 $i$ 是 token 位置</strong>（$j \le i$ 这个因果掩码就是证据），&quot;head&quot; 只是这个单头输出的名字——作者用 head 命名，是为了和多头场景的语义保持一致（多头里每个头也叫 head）。</p>
 <p><strong>单头 vs 多头的直觉区别：</strong></p>
-<table><thead><tr><th></th><th>单头注意力</th><th>多头注意力（GPT-3）</th></tr></thead><tbody>
-<tr><td>头数</td><td>1</td><td>96</td></tr>
-<tr><td>每个头处理的维度</td><td>全部 $d_{\text{model}}=12288$ 维</td><td>切分后每头 $d_{\text{head}}=128$ 维</td></tr>
-<tr><td>$W^Q$ 形状</td><td>$[12288, 12288]$</td><td>每头 $[12288, 128]$</td></tr>
-<tr><td>$\text{head}_i$ 维度</td><td>$12288$</td><td>每头 $128$，拼接后 $12288$</td></tr>
-</tbody></table>
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>单头注意力</th>
+  <th>多头注意力（GPT-3）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>头数</td>
+  <td>1</td>
+  <td>96</td>
+</tr>
+<tr>
+  <td>每个头处理的维度</td>
+  <td>全部 $d_{\text{model}}=12288$ 维</td>
+  <td>切分后每头 $d_{\text{head}}=128$ 维</td>
+</tr>
+<tr>
+  <td>W^Q 形状</td>
+  <td>$[12288, 12288]$</td>
+  <td>每头 $[12288, 128]$</td>
+</tr>
+<tr>
+  <td>head_i 维度</td>
+  <td>$12288$</td>
+  <td>每头 $128$，拼接后 $12288$</td>
+</tr>
+</tbody>
+</table>
 <p><strong>$128 \ne 12288$ 的冲突从哪里来？</strong> 只在把这套公式<strong>套用到多头场景</strong>（每头 $W^Q$ 已切成 $[12288, 128]$）却<strong>不加拼接步</strong>时才会出现。这是应用时遗漏了拼接步骤的问题，不是公式 8.10～8.14 本身的错误。</p>
 <blockquote>
-<p><strong>为什么还要补一套修正公式（8.10′～8.15′）？</strong><br>
+<p><strong>为什么还要补一套修正公式（8.10′～8.15′）？</strong>
 原版 8.10～8.14 是自洽的单头模板，但它<strong>没有显式体现多头</strong>——头编号不出现在任何符号里，读者无法直接看出如何扩展到多头。修正版的目的是把头编号 $(c)$ 和位置下标 $i,j$ 彻底分开写清楚，同时把缺失的拼接步骤（8.14′）和输出投影（8.15′）显式列出，让多头计算流程在符号层面完整可见。</p>
 </blockquote>
 <hr />
-
 <h4>修正版：显式多头注意力公式系列（8.10′～8.15′）</h4>
 <p><strong>约定</strong>：头数 $h=96$，$d_{\text{model}}=12288$，每头维度 $d_{\text{head}}=d_{\text{model}}/h=128$。<strong>上标 $(c)\in\{1,\dots,h\}$ 表示第 $c$ 个头</strong>；<strong>下标 $i$ 为 query 位置、$j$ 为 key/value 位置</strong>。两个维度各占一个符号位，全篇不复用。</p>
-<blockquote><p><strong>说明</strong>：头编号用上标 $(c)$ 是为了和位置下标 $i,j$ 在视觉上分到上/下两层而做的<strong>消歧选择，并非业界标准记号</strong>。最经典的 Vaswani(2017) 反而用下标 $\text{head}_i$ 表示第 $i$ 个头——这也正是原文 $\text{head}_i$ 把「头」和「位置」记号撞车的根源。字母可随意，关键是「头维度与位置维度永不复用」并在开头声明。</p></blockquote>
-
+<blockquote>
+<p><strong>说明</strong>：头编号用上标 $(c)$ 是为了和位置下标 $i,j$ 在视觉上分到上/下两层而做的<strong>消歧选择，并非业界标准记号</strong>。最经典的 Vaswani(2017) 反而用下标 $\text{head}_i$ 表示第 $i$ 个头——这也正是原文 $\text{head}_i$ 把「头」和「位置」记号撞车的根源。字母可随意，关键是「头维度与位置维度永不复用」并在开头声明。</p>
+</blockquote>
 <p><strong>三条简化前提（GPT-3 特例 / 教学抽象，需显式标明）：</strong></p>
-<table><thead><tr><th>声明</th><th>内容</th><th>影响</th></tr></thead><tbody>
-<tr><td>维度合一</td><td>一般注意力允许 $d_k\ne d_v$、缩放只用 key 维 $d_k$；本文代入 GPT-3 恰有 $d_k=d_v=d_{\text{head}}=128$，故统一写 128。</td><td>缩放因子、value 维、单头输出维</td></tr>
-<tr><td>缩放用 key 维</td><td>(8.11′) 的缩放是 $\sqrt{d_k}=\sqrt{128}$，<strong>不是</strong> $\sqrt{d_{\text{model}}}$。</td><td>(8.11′)、矩阵形式</td></tr>
-<tr><td>省略 bias</td><td>投影写成 $xW$ 是教学抽象（bias 为 $O(d)$ 量级，参数量统计中可忽略）；GPT-3 实际实现为 $xW+b$。</td><td>全部投影、$W^O$</td></tr>
-</tbody></table>
-
+<table>
+<thead>
+<tr>
+  <th>声明</th>
+  <th>内容</th>
+  <th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>维度合一</td>
+  <td>一般注意力允许 $d_k\ne d_v$、缩放只用 key 维 $d_k$；本文代入 GPT-3 恰有 $d_k=d_v=d_{\text{head}}=128$，故统一写 128。</td>
+  <td>缩放因子、value 维、单头输出维</td>
+</tr>
+<tr>
+  <td>缩放用 key 维</td>
+  <td>(8.11′) 的缩放是 $\sqrt{d_k}=\sqrt{128}$，<strong>不是</strong> $\sqrt{d_{\text{model}}}$。</td>
+  <td>(8.11′)、矩阵形式</td>
+</tr>
+<tr>
+  <td>省略 bias</td>
+  <td>投影写成 $xW$ 是教学抽象（bias 为 $O(d)$ 量级，参数量统计中可忽略）；GPT-3 实际实现为 $xW+b$。</td>
+  <td>全部投影、$W^O$</td>
+</tr>
+</tbody>
+</table>
 <p><strong>(8.10′) 每头各自投影</strong>（输出 128 维；完整实现为 $x_iW^{Q,(c)}+b^{Q,(c)}$，此处略去 bias）：</p>
-<p>$$\begin{aligned} q_i^{(c)} &= x_i\,W^{Q,(c)} \\ k_j^{(c)} &= x_j\,W^{K,(c)} \\ v_j^{(c)} &= x_j\,W^{V,(c)} \end{aligned} \tag{8.10'}$$</p>
+<p>$$q_i^{(c)} = x_i\,W^{Q,(c)},\quad k_j^{(c)} = x_j\,W^{K,(c)},\quad v_j^{(c)} = x_j\,W^{V,(c)} \tag{8.10'}$$</p>
 <p>$$W^{Q,(c)},W^{K,(c)},W^{V,(c)}\in\mathbb{R}^{12288\times128} \;\Rightarrow\; q_i^{(c)},k_j^{(c)},v_j^{(c)}\in\mathbb{R}^{1\times 128}$$</p>
-
 <p><strong>(8.11′) 该头内得分</strong>（缩放因子为 key 维 $\sqrt{d_k}=\sqrt{128}$）：</p>
-<p>$$\text{score}^{(c)}(x_i,x_j)=\frac{q_i^{(c)}\,\big(k_j^{(c)}\big)^{\!\top}}{\sqrt{d_k}} \tag{8.11'}$$</p>
-<p>矩阵形状：$[1,128]\times[128,1]\to[1,1]$（结果为标量）</p>
-
+<p>$$\text{score}^{(c)}(x_i,x_j)=\frac{q_i^{(c)}\,\big(k_j^{(c)}\big)^{\!\top}}{\sqrt{d_k}} \qquad [1,128]\times[128,1]\to[1,1] \tag{8.11'}$$</p>
 <p><strong>(8.12′) 因果 softmax</strong>（分母显式对 $j'\le i$ 求和，故无歧义）：</p>
-<p>$$\alpha_{ij}^{(c)}=\frac{\exp\!\big(\text{score}^{(c)}(x_i,x_j)\big)}{\displaystyle\sum_{j'\le i}\exp\!\big(\text{score}^{(c)}(x_i,x_{j'})\big)} \tag{8.12'}$$</p>
-<p>其中 $j \leq i$（因果掩码）；$j > i$ 时 $\alpha_{ij}^{(c)} = 0$。</p>
-
+<p>$$\alpha_{ij}^{(c)}=\frac{\exp\!\big(\text{score}^{(c)}(x_i,x_j)\big)}{\displaystyle\sum_{j'\le i}\exp\!\big(\text{score}^{(c)}(x_i,x_{j'})\big)},\quad \forall\,j\le i;\qquad \alpha_{ij}^{(c)}=0\ (j>i) \tag{8.12'}$$</p>
 <p><strong>(8.13′) 单头输出</strong>（128 维，下标 $i$=位置，上标 $(c)$=头）：</p>
-<p>$$\text{head}_i^{(c)}=\sum_{j\le i}\alpha_{ij}^{(c)}\,v_j^{(c)} \tag{8.13'}$$</p>
-<p>输出维度：$\text{head}_i^{(c)}\in\mathbb{R}^{1\times 128}$（下标 $i$=位置，上标 $(c)$=头）。</p>
-
+<p>$$\text{head}_i^{(c)}=\sum_{j\le i}\alpha_{ij}^{(c)}\,v_j^{(c)}\;\in\mathbb{R}^{1\times 128} \tag{8.13'}$$</p>
 <p><strong>(8.14′) 跨头拼接</strong>（原文缺失、修正核心：头上标在此被收掉，结果只剩位置下标）：</p>
-<p>$$o_i=\operatorname{Concat}\!\big(\text{head}_i^{(1)},\dots,\text{head}_i^{(h)}\big) \tag{8.14'}$$</p>
-<p>输出维度：$o_i\in\mathbb{R}^{1\times 12288}$（$h$ 个 128 维向量拼接）。</p>
-
+<p>$$o_i=\operatorname{Concat}\!\big(\text{head}_i^{(1)},\dots,\text{head}_i^{(h)}\big)\in\mathbb{R}^{1\times 12288} \tag{8.14'}$$</p>
 <p><strong>(8.15′) 输出投影</strong>（$W^O$ 作用在<strong>拼接后</strong>的 12288 维上，量纲自洽；完整实现含 $+b^O$）：</p>
-<p>$$a_i = o_i\,W^O \tag{8.15'}$$</p>
-<p>其中 $W^O\in\mathbb{R}^{12288\times12288}$，结果 $a_i\in\mathbb{R}^{1\times 12288}$。</p>
-
-<blockquote><p>对照原文：$a_i=\text{head}_i W^O$ 之所以算不通，正是因为 $\text{head}_i$ 是 128 维而 $W^O$ 要求 12288 维输入。拆出 (8.14′) 拼接步、并用 $o_i$ 与 $\text{head}_i^{(c)}$ 两个符号，缺口即补上。</p></blockquote>
-
-<p><strong>矩阵·整序列形式</strong>（$X\in\mathbb{R}^{n\times d_{\text{model}}}$，$n$ 个 token 一起算）：</p>
+<p>$$a_i = o_i\,W^O,\qquad W^O\in\mathbb{R}^{12288\times12288}\;\Rightarrow\; a_i\in\mathbb{R}^{1\times 12288} \tag{8.15'}$$</p>
+<blockquote>
+<p>对照原文：原文单头公式里的 $\text{head}_i$ 本身是 12288 维、量纲没有问题（见上面第 230～244 行）。如果读者把这个符号直接套用到多头场景，又误以为它指的是&quot;每个头各自的 128 维输出&quot;，就会觉得 $a_i=\text{head}_i W^O$ &quot;算不通&quot;——但这是同一个符号在两种场景下被赋予了不同含义导致的误读，不是原公式本身的缺陷（呼应第 257 行的说明）。修正版用 $\text{head}_i^{(c)}$ 专指&quot;第 $c$ 个头在位置 $i$ 的 128 维输出&quot;，用 $o_i$ 专指&quot;拼接后的 12288 维&quot;，拆出 (8.14′) 这一步拼接后，两个符号各司其职，就不会再产生这种混淆。</p>
+</blockquote>
+<p><strong>矩阵 · 整序列形式</strong>（$X\in\mathbb{R}^{n\times d_{\text{model}}}$，$n$ 个 token 一起算）：</p>
 <p>$$Q^{(c)}=XW^{Q,(c)},\quad K^{(c)}=XW^{K,(c)},\quad V^{(c)}=XW^{V,(c)}\;\in\mathbb{R}^{n\times 128}$$</p>
 <p>$$A^{(c)}=\operatorname{softmax}_{\text{row}}\!\left(\frac{Q^{(c)}\big(K^{(c)}\big)^{\!\top}}{\sqrt{d_k}}+M\right)\in\mathbb{R}^{n\times n},\qquad M_{ij}=\begin{cases}0,& j\le i\\[2pt]-\infty,& j>i\end{cases}$$</p>
 <p>其中 $\operatorname{softmax}_{\text{row}}$ 表示<strong>逐行归一化</strong>：对 $[n,n]$ 分数矩阵的每一行（固定 query 位置 $i$、沿所有 key 位置 $j$）做 softmax，每行之和为 1。这与 (8.12′) 分母 $\sum_{j'\le i}$ 是同一件事的矩阵写法。</p>
 <p>$$H^{(c)}=A^{(c)}V^{(c)}\in\mathbb{R}^{n\times 128},\qquad \operatorname{MultiHead}(X)=\operatorname{Concat}\!\big(H^{(1)},\dots,H^{(h)}\big)\,W^O\in\mathbb{R}^{n\times 12288}$$</p>
 <p>逐位置形式的 $a_i$ 即 $\operatorname{MultiHead}(X)$ 的第 $i$ 行；掩码 $M$ 是 (8.12′) 中 $\forall j\le i$ 的矩阵写法。</p>
-
 <p><strong>与「大矩阵切块」视角对接</strong>：原文说的 $W^Q[12288,12288]$ 切成每头 $[12288,128]$，就是把 $h$ 个头的投影矩阵横向拼接——</p>
 <p>$$W^Q=\big[\,W^{Q,(1)}\ \big|\ \cdots\ \big|\ W^{Q,(h)}\,\big]\in\mathbb{R}^{12288\times12288}$$</p>
 <p>「一次大乘法 $XW^Q$ 再切 96 段」与「跑 96 次 $XW^{Q,(c)}$」数值完全等价：前者是工程并行写法，后者是 (8.10′) 的数学定义。</p>
-
 <p><strong>量纲自检：</strong></p>
-<table><thead><tr><th>检查项</th><th>结果</th></tr></thead><tbody>
-<tr><td>单头投影参数量</td><td>$96\times(12288\times128)=12288^2=1.51$ 亿 ✓</td></tr>
-<tr><td>拼接维度</td><td>$96\times128=12288=d_{\text{model}}$ ✓</td></tr>
-<tr><td>输出投影</td><td>$o_i[1,12288]\times W^O[12288,12288]\to[1,12288]$ ✓</td></tr>
-<tr><td>缩放因子</td><td>$\sqrt{d_k}=\sqrt{128}\approx11.3$，与原文 Step 2 一致 ✓</td></tr>
-<tr><td>$W^O$ 参数量</td><td>$12288^2=1.51$ 亿 ✓</td></tr>
-</tbody></table>
+<table>
+<thead>
+<tr>
+  <th>检查项</th>
+  <th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>单头投影参数量</td>
+  <td>$96\times(12288\times128)=12288^2=1.51$ 亿 ✓</td>
+</tr>
+<tr>
+  <td>拼接维度</td>
+  <td>$96\times128=12288=d_{\text{model}}$ ✓</td>
+</tr>
+<tr>
+  <td>输出投影</td>
+  <td>$o_i[1,12288]\times W^O[12288,12288]\to[1,12288]$ ✓</td>
+</tr>
+<tr>
+  <td>缩放因子</td>
+  <td>$\sqrt{d_k}=\sqrt{128}\approx11.3$，与原文 Step 2 一致 ✓</td>
+</tr>
+<tr>
+  <td>$W^O$ 参数量</td>
+  <td>$12288^2=1.51$ 亿 ✓</td>
+</tr>
+</tbody>
+</table>
 <p>四处全部闭合，不再出现 $128\ne12288$ 的冲突。</p>
 <hr />
-
 <p><strong>Step 1：生成 Q、K、V</strong></p>
-<p>每个头的 $W^Q$ 是从完整 $[12288,\ 12288]$ 矩阵里切出的 $[12288,\ 128]$ 部分：</p>
-<p>$$q_3 = x_3 \cdot W^Q \quad [1,\ 128] \leftarrow [1,\ 12288] \times [12288,\ 128]$$</p>
+<p><strong>这里需要对照上面 8.10′～8.15′ 的严格记号说明一下</strong>：下面这段数值演示只走某一个固定的头（比如第 1 个头，$c=1$），为了书写简洁略去了上标 $(c)$——严格按上面的记号，这里的 $W^Q$ 都应该写成 $W^{Q,(1)}\in\mathbb R^{12288\times128}$（从完整 $W^Q\in\mathbb R^{12288\times12288}$ 矩阵里切出的一个头的切片），$q_3,k_j,v_j$ 都应该写成 $q_3^{(1)},k_j^{(1)},v_j^{(1)}$。下文的 $W^K,W^V$ 同理都是各自完整矩阵切出的单头切片，不再逐处重复上标。</p>
+<p>$$q_3 = x_3 \cdot W^Q \quad [1,\ 128] \leftarrow [1,\ 12288] \times [12288,\ 128] \qquad (\text{严格记号：}q_3^{(1)}=x_3W^{Q,(1)})$$</p>
 <p>$$q_3 = [0.5,\ 0.2,\ -0.1,\ \ldots] \quad \text{（128个数）}$$</p>
 <p>$$k_1 = [0.4,\ 0.7,\ 0.1,\ \ldots] \quad v_1 = [0.3,\ -0.1,\ 0.5,\ \ldots] \quad \text{（"黑"）}$$</p>
 <p>$$k_2 = [0.6,\ 0.3,\ -0.2,\ \ldots] \quad v_2 = [0.1,\ 0.8,\ 0.2,\ \ldots] \quad \text{（"猫"）}$$</p>
 <p>$$k_3 = [0.2,\ 0.5,\ 0.4,\ \ldots] \quad v_3 = [0.6,\ 0.2,\ -0.3,\ \ldots] \quad \text{（"睡"自己）}$$</p>
-
-<p><strong>Step 2：计算得分（除以 $\sqrt{128} \approx 11.3$ 防止梯度消失）</strong></p>
+<p><strong>Step 2：计算得分（除以 $\sqrt{128} \approx 11.3$）</strong></p>
+<p>除以 $\sqrt{d_k}$ 的直接作用是<strong>控制 $QK^\top$ 点积的方差</strong>：如果 Q、K 各分量方差是 1，未缩放的点积方差会随维度 $d_k$ 线性增长，维度越高点积越容易偏大；偏大的数值送进 softmax 会让分布迅速饱和（趋近 one-hot），饱和区域的梯度非常小。&quot;防止梯度消失&quot;只是这个饱和效应的下游结果，缩放本身直接解决的是&quot;点积方差随维度增长、导致 softmax 饱和&quot;这个问题。</p>
+<p>（下面 $q_3\cdot k_1,q_3\cdot k_2,q_3\cdot k_3$ 取 0.33、0.52、0.71 是为了演示流程而设定的<strong>假设值</strong>——Step 1 的 128 维向量只展示了前几个分量、用&quot;…&quot;省略了其余分量，没法从展示的片段直接复算出这几个完整点积，这里只是示意取值。）</p>
 <p>$$\text{score}(x_3, x_1) = \frac{0.33}{11.3} \approx 0.029$$</p>
 <p>$$\text{score}(x_3, x_2) = \frac{0.52}{11.3} \approx 0.046$$</p>
 <p>$$\text{score}(x_3, x_3) = \frac{0.71}{11.3} \approx 0.063$$</p>
-
 <p><strong>Step 3：Softmax 归一化</strong></p>
-<p>$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.319,\ 0.328,\ 0.353]$$</p>
-<table><thead><tr><th>词</th><th>注意力权重</th><th>解读</th></tr></thead><tbody>
-<tr><td>"黑"</td><td>31.9%</td><td>"睡"对"黑"的关注程度</td></tr>
-<tr><td>"猫"</td><td>32.8%</td><td>"睡"对"猫"的关注程度</td></tr>
-<tr><td>"睡"自己</td><td>35.3%</td><td>"睡"对自身的关注程度</td></tr>
-</tbody></table>
-
-<p><strong>Step 4：加权求和，得到单头输出</strong></p>
-<p>$$\text{head}_3 = 0.319 \times v_1 + 0.328 \times v_2 + 0.353 \times v_3$$</p>
-<p>$$\text{head}_3 = [0.341,\ 0.301,\ \ldots] \quad \text{（128个数，第1头的输出）}$$</p>
-
+<p>$$[\alpha_{31},\ \alpha_{32},\ \alpha_{33}] = \text{softmax}([0.029,\ 0.046,\ 0.063]) \approx [0.328,\ 0.333,\ 0.339]$$</p>
+<table>
+<thead>
+<tr>
+  <th>词</th>
+  <th>注意力权重</th>
+  <th>解读</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>&quot;黑&quot;</td>
+  <td>32.8%</td>
+  <td>&quot;睡&quot;对&quot;黑&quot;的关注程度</td>
+</tr>
+<tr>
+  <td>&quot;猫&quot;</td>
+  <td>33.3%</td>
+  <td>&quot;睡&quot;对&quot;猫&quot;的关注程度</td>
+</tr>
+<tr>
+  <td>&quot;睡&quot;自己</td>
+  <td>33.9%</td>
+  <td>&quot;睡&quot;对自身的关注程度</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Step 4：加权求和，得到单头输出（公式 8.13）</strong></p>
+<p>$$\text{head}_3 = 0.328 \times v_1 + 0.333 \times v_2 + 0.339 \times v_3$$</p>
+<p>（下面两个分量用的是 softmax 输出未经三位小数四舍五入前的精确值 $\approx[0.32768,\ 0.33330,\ 0.33902]$ 参与计算，表格里展示的 $0.328/0.333/0.339$ 是显示用的四舍五入结果——如果直接拿这三个已经舍入的数字代入，第 2 维算出来约是 $0.301$ 而不是 $0.302$，差异纯粹来自舍入顺序，不是计算错误）</p>
+<p>第1维：$\approx0.32768 \times 0.3 + 0.33330 \times 0.1 + 0.33902 \times 0.6 \approx 0.335$</p>
+<p>第2维：$\approx0.32768 \times (-0.1) + 0.33330 \times 0.8 + 0.33902 \times 0.2 \approx 0.302$</p>
+<p>$$\text{head}_3 = [0.335,\ 0.302,\ \ldots] \quad \text{（128个数，第1头的输出）}$$</p>
 <p><strong>Step 5：96个头拼接</strong></p>
-<pre><code>第1头：  [0.341, 0.301, ..., ]   → 128个数
+<pre><code>第1头：  [0.335, 0.302, ..., ]   → 128个数
 第2头：  [0.112, -0.205, ..., ]  → 128个数
 ...
-第96头： [0.223, 0.671, ..., ]   → 128个数</code></pre>
-<p>$$96 \times 128 = 12288 \quad \Rightarrow \quad \text{concat} = [0.341,\ 0.301,\ \ldots,\ 0.223,\ 0.671,\ \ldots] \quad \text{（12288个数）}$$</p>
-
+第96头： [0.223, 0.671, ..., ]   → 128个数
+</code></pre>
+<p>$$96 \times 128 = 12288 \quad \Rightarrow \quad \text{concat} = [0.335,\ 0.302,\ \ldots,\ 0.223,\ 0.671,\ \ldots] \quad \text{（12288个数）}$$</p>
 <p><strong>多头注意力完整流程图：</strong></p>
-<pre><code>x₃（"睡"）[1, 12288]
+<pre><code>x₃（&quot;睡&quot;）[1, 12288]
        │
    ┌───┴──────────── 96个头并行 ──────────────┐
    │                                           │
@@ -328,52 +522,99 @@
    └── Σαⱼ·vⱼ → head₁ [1,128]
    │                                           │
    └──────── 拼接 concat ─────────────────────┘
-             [1, 12288]（= 96 × 128）</code></pre>
+             [1, 12288]（= 96 × 128）
+</code></pre>
 <hr />
-
 <p><strong>O 投影（第 4 次矩阵乘法）：</strong></p>
 <p>$$[1,\ 12288] \cdot W_O[12288,\ 12288] \rightarrow [1,\ 12288]$$</p>
 <p>$W_O$ 参数量也是 1.51 亿。</p>
-<blockquote><p><strong>O 投影的作用</strong>：96 个头拼接后只是简单堆叠，$W_O$ 对来自不同头的信息进行"融合"，让不同角度的语义信息真正混合在一起。</p></blockquote>
-<p><strong>Attention 层共 4 次矩阵乘法，参数量：</strong></p>
+<blockquote>
+<p><strong>O 投影的作用</strong>：96 个头拼接后只是简单堆叠，$W_O$ 对来自不同头的信息进行&quot;融合&quot;，让不同角度的语义信息真正混合在一起。</p>
+</blockquote>
+<p><strong>Attention 层的 4 次带参数投影矩阵乘法，参数量：</strong></p>
 <p>$$4 \times 12288^2 = \textbf{6.04 亿}$$</p>
-
+<p>（这只是参数量的统计；FLOPs 层面 Attention 内部还有 $QK^\top,AV$ 两类不带参数的矩阵乘法，第四节会一并算入。）</p>
 <h4>残差连接</h4>
 <p>$$x_1 = x_0 + \text{attn\_out} \quad [1,\ 12288]$$</p>
-
 <h4>FFN：2 次矩阵乘法，中间维度扩大 4 倍</h4>
+<p><strong>第一次——升维（$\times 4$）：</strong></p>
 <p>$$[1,\ 12288] \cdot W_1[12288,\ 49152] \rightarrow [1,\ 49152]$$</p>
 <p>$$W_1 \text{ 参数量} = 12288 \times 49152 = \textbf{6.04 亿}$$</p>
-<p>激活函数 GELU（形状不变）：$[1,\ 49152] \rightarrow [1,\ 49152]$</p>
+<p><strong>激活函数 GELU（形状不变）：</strong></p>
+<p>$$[1,\ 49152] \rightarrow [1,\ 49152]$$</p>
+<p><strong>第二次——降维：</strong></p>
 <p>$$[1,\ 49152] \cdot W_2[49152,\ 12288] \rightarrow [1,\ 12288]$$</p>
 <p>$$W_2 \text{ 参数量} = 49152 \times 12288 = \textbf{6.04 亿}$$</p>
+<p><strong>FFN 层 2 次矩阵乘法，参数量合计：</strong></p>
+<p>$$2 \times 12288 \times 49152 = \textbf{12.08 亿}$$</p>
 <p><strong>FFN 相当于 8 个 $[12288 \times 12288]$ 的大小——贡献了模型约 2/3 的参数量和计算量。</strong></p>
-
 <h4>一层 Block 参数量汇总</h4>
-<table><thead><tr><th>组件</th><th>参数量</th></tr></thead><tbody>
-<tr><td>$W_Q$</td><td>1.51 亿</td></tr>
-<tr><td>$W_K$</td><td>1.51 亿</td></tr>
-<tr><td>$W_V$</td><td>1.51 亿</td></tr>
-<tr><td>$W_O$</td><td>1.51 亿</td></tr>
-<tr><td>$W_1$（FFN 升维）</td><td>6.04 亿</td></tr>
-<tr><td>$W_2$（FFN 降维）</td><td>6.04 亿</td></tr>
-<tr><td><strong>一层合计</strong></td><td><strong>18.1 亿</strong></td></tr>
-</tbody></table>
+<table>
+<thead>
+<tr>
+  <th>组件</th>
+  <th>参数量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>$W_Q$</td>
+  <td>1.51 亿</td>
+</tr>
+<tr>
+  <td>$W_K$</td>
+  <td>1.51 亿</td>
+</tr>
+<tr>
+  <td>$W_V$</td>
+  <td>1.51 亿</td>
+</tr>
+<tr>
+  <td>$W_O$</td>
+  <td>1.51 亿</td>
+</tr>
+<tr>
+  <td>$W_1$（FFN 升维）</td>
+  <td>6.04 亿</td>
+</tr>
+<tr>
+  <td>$W_2$（FFN 降维）</td>
+  <td>6.04 亿</td>
+</tr>
+<tr>
+  <td>各线性层 bias（$W_Q,W_K,W_V,W_O,W_1,W_2$ 合计）</td>
+  <td>约 0.0011 亿</td>
+</tr>
+<tr>
+  <td>两个 LayerNorm 的 $\gamma,\beta$</td>
+  <td>约 0.0005 亿</td>
+</tr>
+<tr>
+  <td><strong>一层合计</strong></td>
+  <td><strong>约 18.12 亿</strong></td>
+</tr>
+</tbody>
+</table>
 <hr />
-
 <h3>第三步：96 层累计参数量</h3>
-<p>$$96 \times 18.1\text{亿} = \textbf{1,738 亿}$$</p>
-<p>加上 Embedding 矩阵 6.2 亿，合计约 <strong>1750 亿参数</strong>。✓ 与 GPT-3 标称一致。</p>
+<p>$$96 \times 18.12\text{亿} \approx \textbf{1,740 亿}$$</p>
+<p>加上：</p>
+<ul>
+<li>Token Embedding：$50257\times12288\approx6.18$ 亿</li>
+<li>Position Embedding（GPT-3 用的是<strong>学习式</strong>位置嵌入，不是固定的正余弦编码；按上下文长度 2048、每个位置一个 12288 维向量算）：$2048\times12288\approx0.25$ 亿</li>
+<li>Final LayerNorm 的 $\gamma,\beta$：约 2.46 万（即约 0.0000246 亿），可以忽略</li>
+</ul>
+<p>合计约 <strong>1746 亿参数</strong>，和 GPT-3 标称的&quot;175B&quot;在这个精度上大致吻合。</p>
+<p><strong>这里有一个隐含假设需要挑明</strong>：上面只计入了<strong>一份</strong> Embedding 矩阵，没有再单独计入一个同样大小的输出投影矩阵——这隐含假设了 Token Embedding 和 Unembedding <strong>权重共享</strong>（$U=E^\top$）。这也正是 GPT-2/GPT-3 的真实做法：OpenAI 官方 GPT-2 代码里就是直接用输入词嵌入矩阵的转置去算 logits，GPT-3 论文也说明除了稀疏注意力这一处改动外沿用 GPT-2 架构。如果不共享权重，还要再加约 6.18 亿参数，总数变成约 1752 亿——两种情况在这个精度上都还是&quot;175B&quot;，所以不能仅凭&quot;总数对不对得上标称值&quot;来判断权重是否共享，这里&quot;合计约1750亿&quot;只是<strong>忽略若干小项后的近似核对</strong>，不是精确推导。</p>
 <hr />
-
-<h3>第四步：Unembedding + Softmax</h3>
-<p>$$h_{\text{final}} [1,\ 12288] \cdot U[12288,\ 50527] \rightarrow [1,\ 50527]$$</p>
-<p>Softmax 后得到 50,527 个词的概率分布，取最大值得到预测的下一个词。</p>
+<h3>第四步：Final LayerNorm + Unembedding + Softmax</h3>
+<p>96 层 Transformer Block 全部走完后，GPT-2/GPT-3 风格模型还有一次<strong>最终 LayerNorm</strong>（$\text{LN}_f$），之后才做 Unembedding：</p>
+<p>$$h_{96} [1,\ 12288] \xrightarrow{\ \text{LN}_f\ } h_{\text{final}} [1,\ 12288] \cdot U[12288,\ 50257] \rightarrow [1,\ 50257]$$</p>
+<p>Softmax 后得到 50,257 个词的概率分布。生成下一个词时，取最大概率（贪心解码）只是最简单的一种做法；实际生成通常还会配合 temperature、top-k、top-p 等采样策略，不是每次都直接取 argmax。</p>
 <hr />
-
 <h3>完整数据流</h3>
 <pre><code>1个token（id=42）
-   ↓ Embedding [50527, 12288]
+   ↓ Embedding [50257, 12288]（+ 位置嵌入，学习式，逐位置索引查表）
 x₀: [1, 12288]
    ↓ × 96层，每层：
    │
@@ -390,28 +631,57 @@ x₀: [1, 12288]
    ├─ × W₂ [49152,12288] → [1,12288]
    └─ ⊕ 残差连接 → [1,12288]
    ↓ 96层后
+h₉₆: [1, 12288]
+   ↓ Final Layer Norm（LN_f）
 h_final: [1, 12288]
-   ↓ × U [12288, 50527]
-logits: [1, 50527]
+   ↓ × U [12288, 50257]
+logits: [1, 50257]
    ↓ Softmax
-概率分布：50,527个词各自的概率</code></pre>
+概率分布：50,257个词各自的概率（取 argmax 是贪心解码，也可配合 temperature/top-k/top-p 采样）
+</code></pre>
 <hr />
-
-<h2>四、乘上 Batch Size：真实训练规模</h2>
-<p>训练时 320 万个 token 同时处理，每次大矩阵乘法的实际形状：</p>
-<table><thead><tr><th>矩阵乘法</th><th>形状</th></tr></thead><tbody>
-<tr><td>$X \cdot W_Q$</td><td>$[3200000,\ 12288] \times [12288,\ 12288]$</td></tr>
-<tr><td>$X \cdot W_1$</td><td>$[3200000,\ 12288] \times [12288,\ 49152]$</td></tr>
-<tr><td>$X \cdot W_2$</td><td>$[3200000,\ 49152] \times [49152,\ 12288]$</td></tr>
-</tbody></table>
-<p>$$2 \times 3,200,000 \times 12,288 \times 12,288 \approx \textbf{966 万亿次} \quad \text{（一次 }W_Q\text{ 乘法的 FLOPs）}$$</p>
-<p>$$6 \times 966\text{万亿} \approx \textbf{5,800 万亿次} \quad \text{（一层 Block 共 6 次大矩阵乘法）}$$</p>
-<p>$$96 \times 5800\text{万亿} \approx 5.57 \times 10^{17} \text{ 次} \quad \text{（96 层前向传播）}$$</p>
-<p>加上反向传播（约为前向的 2 倍），一个 step 总计：</p>
-<p>$$\approx 1.67 \times 10^{18} \text{ 次浮点运算}$$</p>
+<h2 id="sec4">四、乘上 Batch Size：真实训练规模</h2>
+<p>训练时一个完整 batch 覆盖 320 万个 token（不是物理上同时驻留或单次执行，而是一个 step 里累计处理的 token 总数——具体怎么拆到多张 GPU、多个 microbatch 上是第二节已经说明过的工程细节），把这些 token 展平后<strong>等价的总矩阵乘法规模</strong>是：</p>
+<table>
+<thead>
+<tr>
+  <th>矩阵乘法</th>
+  <th>等价形状（总运算量口径）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>$X \cdot W_Q$</td>
+  <td>$[3200000,\ 12288] \times [12288,\ 12288]$</td>
+</tr>
+<tr>
+  <td>$X \cdot W_1$</td>
+  <td>$[3200000,\ 12288] \times [12288,\ 49152]$</td>
+</tr>
+<tr>
+  <td>$X \cdot W_2$</td>
+  <td>$[3200000,\ 49152] \times [49152,\ 12288]$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这里再次强调</strong>：这是把 320 万个 token 展平后的等价总运算量表示，不是训练时某一次真实执行的单个 GEMM 形状——实际会拆到多个数据并行副本、每张 GPU 的局部 batch/microbatch，以及张量并行、流水线并行等切分方式上，用总 FLOPs（$2Tmn$）来理解这张表是准确的，用&quot;这就是一次真实矩阵乘法的输入规模&quot;来理解则不准确。</p>
+<p><strong>一次 $W_Q$ 乘法的 FLOPs：</strong></p>
+<p>$$2 \times 3,200,000 \times 12,288 \times 12,288 \approx \textbf{966 万亿次}$$</p>
+<p><strong>一层 Block 的线性层 FLOPs：</strong></p>
+<p>$Q,K,V,O$ 四个矩阵都是 $[12288,12288]$ 规模（各算一次 966 万亿）；但 $W_1,W_2$ 分别是 $[12288,49152]$ 和 $[49152,12288]$，比 $W_Q$ 大 <strong>4 倍</strong>，各自的 FLOPs 也是 966 万亿的 4 倍，不能按同样大小直接相加。按等价 $d\times d$ 规模换算，一层一共是：</p>
+<p>$$\underbrace{4}_{W_Q,W_K,W_V,W_O\text{（各 1 倍）}} + \underbrace{2\times4}_{W_1,W_2\text{（各 4 倍）}} = 12 \text{ 个等价规模}$$</p>
+<p>$$12 \times 966\text{万亿} \approx \textbf{1.160\times10^{16}} \text{ 次}$$</p>
+<p><strong>注意力本身的 $QK^\top$ 和加权求和（$AV$）也有 FLOPs，容易被漏算</strong>：对稠密注意力，这两步合计约为每层 $4TSd$（$S$ 是序列长度，这里取 GPT-3 常见的 2048）：</p>
+<p>$$4 \times 3.2\times10^6 \times 2048 \times 12288 \approx 3.22\times10^{14}\text{ 次/层，} 96\text{ 层约} 3.09\times10^{16}\text{ 次}$$</p>
+<p>这一项比线性层小得多，但不是 0。<strong>另外需要说明</strong>：GPT-3 并不是全部 96 层都用完整的稠密因果注意力，论文里提到是稠密注意力和局部带状稀疏注意力交替使用的，所以这里按&quot;全部稠密&quot;算出的注意力 FLOPs 是一个偏高的上界，不是精确值。</p>
+<p><strong>96 层线性层 + 注意力 FLOPs 合计（前向传播）：</strong></p>
+<p>$$96 \times 1.160\times10^{16} + 3.09\times10^{16} \approx 1.113\times10^{18} + 0.031\times10^{18} \approx 1.14\times10^{18} \text{ 次}$$</p>
+<p><strong>加上反向传播（约为前向的 2 倍），一个 step 总计：</strong></p>
+<p>$$\approx 3.4 \times 10^{18} \text{ 次浮点运算}$$</p>
+<p>（这个数量级和常用的经验估算 $6NT$ 基本吻合：用全模型参数量 $N\approx175\times10^9$、$T=3.2\times10^6$，$6NT\approx3.36\times10^{18}$，两种算法结果一致，说明这不是巧合，而是同一套&quot;参数量主导 FLOPs&quot;的逻辑。）</p>
+<p><strong>需要说明</strong>：$3.4\times10^{18}$ 是<strong>主导项的近似值</strong>，不是把每个算子都逐项精确相加的结果——还没单独算 Unembedding、LayerNorm、GELU、bias 加法、softmax/交叉熵、以及 Embedding 查表反向这些开销。以 Unembedding 为例，$2TdV=2\times3.2\times10^6\times12288\times50257\approx3.95\times10^{15}$，前向+反向约 $1.19\times10^{16}$，占 $3.4\times10^{18}$ 的约 0.35%——量级上完全不影响这里的结论，但&quot;一个 step 总计&quot;更准确的理解是&quot;由参数矩阵和注意力 $S^2$ 项主导的近似&quot;，不是所有算子逐一相加的精确总和。）</p>
 <hr />
-
-<h2>五、FLOPs 与电能消耗的关系</h2>
+<h2 id="sec5">五、FLOPs 与电能消耗的关系</h2>
 <h3>连接 FLOPs 和电能的桥梁</h3>
 <p>核心指标是<strong>能效比</strong>：</p>
 <p>$$\text{能效} = \frac{\text{FLOP/s}}{\text{Watt}}$$</p>
@@ -420,51 +690,448 @@ logits: [1, 50527]
 <p>$$\text{电能（焦耳）} = \frac{\text{总 FLOPs}}{\text{FLOP/s per Watt}}$$</p>
 <p>$$\text{电度数（kWh）} = \frac{\text{电能（焦耳）}}{3,600,000}$$</p>
 <h3>用 GPT-3 真实数字推算</h3>
-<p>训练用 V100 GPU，能效约 $4.7 \times 10^{11}$ FLOP/s per Watt（功耗 300W，吞吐 $1.4 \times 10^{14}$ FLOP/s）。</p>
-<p>$$\text{总 steps} = \frac{3 \times 10^{11}}{3.2 \times 10^6} \approx 93,750$$</p>
-<p>$$\text{单 step 耗时} = \frac{1.67 \times 10^{18}}{1024 \times 1.4 \times 10^{14}} \approx 11.6 \text{ 秒}$$</p>
-<p>$$1024 \times 300W \times 11.6s \approx 0.99 \text{ kWh/step}$$</p>
-<p>$$93,750 \times 0.99 \approx \textbf{93 MWh（理论下限）}$$</p>
-<h3>理论值 vs 实测值</h3>
-<table><thead><tr><th></th><th>数值</th></tr></thead><tbody>
-<tr><td>理论下限（纯计算）</td><td>93 MWh</td></tr>
-<tr><td>实测消耗</td><td><strong>1,287 MWh</strong></td></tr>
-<tr><td>差距倍数</td><td>约 14 倍</td></tr>
-</tbody></table>
-<p>差距来源：</p>
-<table><thead><tr><th>额外开销</th><th>说明</th></tr></thead><tbody>
-<tr><td>PUE（数据中心能效系数）</td><td>散热、照明、网络等，通常使总用电乘以 1.2～1.5 倍</td></tr>
-<tr><td>GPU 利用率不足</td><td>等待通信和 IO 的时间也在耗电</td></tr>
-<tr><td>梯度检查点、重算</td><td>为节省显存，部分激活值需重新计算</td></tr>
-<tr><td>网络通信开销</td><td>数千张 GPU 之间同步梯度</td></tr>
-<tr><td>训练不稳定、重启</td><td>训练中途崩溃重启浪费电力</td></tr>
-</tbody></table>
-<h3>实测数据</h3>
-<p>训练 GPT-3 实际消耗约 <strong>1,287 MWh</strong> 电力，排放超过 <strong>550 公吨 CO₂e</strong>，以及超过 <strong>700 千升</strong>水用于冷却（相当于三分之二个奥运标准泳池）。训练 GPT-4 的用电量是 GPT-3 的约 <strong>16.5 倍</strong>。</p>
-<h3>推理比训练更烧钱</h3>
-<p>推理可能占模型整个生命周期能源使用的 <strong>90%</strong>。</p>
+<p>训练用 V100 GPU，NVIDIA 官方规格里 Tensor Core FP16 峰值约为 <strong>125 TFLOP/s</strong>（一些资料里出现的 140 并不是官方峰值，这里改用官方数字），能效约为：</p>
+<p>$$\frac{125\times10^{12}\text{ FLOP/s}}{300\text{W}} \approx 4.17 \times 10^{11} \text{ FLOP/s per Watt}$$</p>
+<p><strong>按完整 batch size 折算的等效 step 数：</strong></p>
+<p>$$\text{等效 steps} = \frac{3 \times 10^{11} \text{ tokens}}{3.2 \times 10^6 \text{ tokens/step}} \approx 93,750 \text{ steps}$$</p>
+<p><strong>需要说明</strong>：这里的 $93{,}750$ 是&quot;假设从头到尾都用完整 3.2M batch size&quot;折算出来的等效 step 数，不是 GPT-3 实际训练的优化器更新总次数。论文提到训练早期会把 batch size 从 32K token 线性爬升到完整的 3.2M token，爬升过程持续最初的 40 亿～120 亿 token；按这个爬升过程做连续近似，实际的优化器更新次数会比 93,750 略多（大致落在 9.8 万～10.7 万这个量级，具体数字取决于 175B 模型实际采用的爬升长度和离散调度方式，论文没有披露到这个精度）。但这不影响后面的总 FLOPs 和能耗估算：</p>
+<p>$$\sum_{\text{step}}6N\,T_{\text{step}}=6N\sum_{\text{step}}T_{\text{step}}\approx6N\times3\times10^{11}$$</p>
+<p>只要每个 step 处理的 token 数加总仍是 3,000 亿，<strong>主干模型 FLOPs 总量</strong>（$6NT$ 这套近似）就与具体怎么拆分成多少个 step、每个 step 多大无关。<strong>但&quot;总电能也同样无关&quot;这个结论只在下面这套理想化假设下成立</strong>：真实电能 $E=\sum_s P_s\,t_s$，如果 batch 较小的早期 step 里 GPU 利用率更低、通信占比更高、kernel 效率更差，或者每个 step 存在不随 batch 大小变化的固定开销（比如优化器更新这类按 step 发生、不完全随 token 数线性缩放的计算），真实总电能未必和&quot;总 FLOPs 不变&quot;一样保持不变。下面 213 MWh 这个数字用的是&quot;始终按固定峰值 $\text{FLOP/s per Watt}$、忽略每 step 固定开销&quot;这个理想化模型，在<strong>这个模型内部</strong> $E_\text{ideal}=\dfrac{\text{总FLOPs}}{\text{固定峰值 FLOP/s per Watt}}$ 确实只取决于总 FLOPs、与怎么拆分 step 无关；但这不代表真实训练的电能也对 batch 调度方式不敏感——213 MWh 这个数字本身就是&quot;理想化设备侧估算&quot;，不受这里讨论的 batch 爬升影响，只是这个&quot;不受影响&quot;是理想化模型的性质，不能推广成&quot;真实电能也与 batch 拆分无关&quot;这个更强的结论。</p>
+<p><strong>&quot;完整 batch 等效 step&quot;耗时</strong>（假设 1024 张 V100，用第四节修正后的、按完整 3.2M-token batch 算出的单 step FLOPs $\approx 3.4\times10^{18}$——这个耗时只对应&quot;完整 batch、1024 张 V100、每张都跑在 125 TFLOP/s 峰值&quot;这组假设，训练早期 batch 从 32K 逐渐爬升到 3.2M 时，实际每个 step 的 FLOPs 更小，耗时也会相应更短）：</p>
+<p>$$\frac{3.4 \times 10^{18}}{1024 \times 125 \times 10^{12}} \approx 26.6 \text{ 秒}$$</p>
+<p><strong>&quot;完整 batch 等效 step&quot;电能</strong>（同样只对应完整 batch 这组假设，不是训练早期较小 batch 下的单 step 电能）：</p>
+<p>$$1024 \times 300W \times 26.6s \div 3{,}600{,}000 \approx 2.27 \text{ kWh}$$</p>
+<p><strong>训练总电能（理想化设备侧估算：假设 GPU 持续跑在峰值算力，且只按 GPU 芯片 300W TDP 这个功率边界计算，不含服务器其他部件）：</strong></p>
+<p>$$93,750\ (\text{等效 steps}) \times 2.27 \approx \textbf{213 MWh}$$</p>
+<p>（交叉验证：$93,750$ 个等效 step $\times 3.4\times10^{18}$ FLOPs/步 $\approx3.19\times10^{23}$ FLOPs，这和 Patterson 等人论文报告的 GPT-3 训练总量 $3.14\times10^{23}$ FLOPs 量级和主导项口径基本吻合——但这只能排除数量级错误，不能说&quot;证明了架构推导本身是自洽的&quot;：两边的估算都主要由参数量 $N$、token 数 $T$ 以及&quot;训练约为 $6NT$&quot;这套关系决定，本身不是两个完全独立的验证；而且本文这里全用稠密注意力（正文已说明这是偏高的上界）、用&quot;反向约为前向 2 倍&quot;的近似、也没有逐项加入 Unembedding、LayerNorm、GELU、交叉熵等运算，这些简化造成的高估和遗漏造成的低估完全可能相互抵消，让总数&quot;凑巧&quot;接近 Patterson 的数字。这里用两位有效数字的 $3.4\times10^{18}$ 算出的差距约 1.5%，如果代入前面运算链条里未经四舍五入的单 step 结果（约 $3.4325\times10^{18}$），差距约 2.5%——但需要说明：$3.4325\times10^{18}$ 本身也不是更接近真实 GPT-3 FLOPs 的精确值，只是&quot;在本文这套简化模型内部不做四舍五入&quot;的结果，真正更大的不确定性来自上面说的架构简化和算子遗漏，不是要不要四舍五入这么小的差别。所以 1.5%～2.5% 这个区间不必看作精确统计量，更适合理解成&quot;量级和主导项口径相互吻合，差距在估算误差范围内&quot;。）</p>
+<p><strong>这里&quot;213 MWh&quot;最好不要叫&quot;理论下限&quot;</strong>：$125$ TFLOP/s 和 $300$W 都是规格表上的数字（分别是峰值算力和芯片额定最大功耗），两者不保证在同一个真实工作点上同时成立——GPU 跑到峰值算力时实际功耗不一定恰好是 300W。所以 213 MWh 更准确的定位是&quot;基于规格表峰值算力和 TDP 算出的理想化估算&quot;，不是一个经过测量证明的严格数学下限。</p>
+<h3>理论值 vs 论文报告的估算值</h3>
+<table>
+<thead>
+<tr>
+  <th></th>
+  <th>数值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>理想化设备侧估算（按 125 TFLOP/s 峰值、300W GPU 芯片 TDP 计算，非严格下限）</td>
+  <td>约 213 MWh</td>
+</tr>
+<tr>
+  <td>Patterson 等人论文给出的估算值</td>
+  <td><strong>1,287 MWh</strong></td>
+</tr>
+<tr>
+  <td>差距倍数</td>
+  <td>约 6 倍</td>
+</tr>
+</tbody>
+</table>
+<p><strong>这约 6 倍的差距不是单一原因，可以拆开来看，但要注意这几项在物理上并不完全独立</strong>：</p>
+<ol>
+<li><strong>达成吞吐与峰值吞吐的差距</strong>：Patterson 论文给出的 GPT-3 实际训练吞吐约为 <strong>24.6 TFLOP/s</strong>（论文原文称其为 measured performance，不一定严格等同于后来文献里对 MFU 的正式定义），只有 125 TFLOP/s 峰值的约 20%，可以作为一个近似的利用率指标。这背后是显存带宽瓶颈、kernel 调度效率、GPU 间通信等待、梯度检查点重算、负载不均衡等因素<strong>共同造成</strong>的，没有性能剖析（profiling）数据无法精确拆分各自占比。达成/峰值吞吐比：$125/24.6\approx5.08$ 倍。</li>
+<li><strong>功率统计边界不同</strong>：本文算 213 MWh 用的 300W 是 V100 的<strong>芯片 TDP</strong>规格；Patterson 论文给出的 330W 是<strong>该次实际训练里每个加速器对应的系统平均功率</strong>，论文里说明这个数字已经包含内存、网络接口、风扇和主机 CPU 的分摊功耗。$330/300\approx1.10$ 倍的差异，部分来自这个统计边界不同。</li>
+<li><strong>PUE（数据中心能效系数）</strong>：约 1.10 倍，是把 IT 设备能耗换算成数据中心总能耗的系数，和算力吞吐没有直接关系。</li>
+</ol>
+<p>三者相乘 $5.08\times1.10\times1.10\approx6.15$ 倍。<strong>这个 6.15 倍精确对应的是&quot;用同一个总 FLOPs（Patterson 论文的 $3.14\times10^{23}$）分别代入规格表口径和实测口径&quot;算出来的比值</strong>：$3.14\times10^{23}/(125\text{TFLOP/s}/300\text{W})/3.6\times10^6\approx209.3$ MWh，$1287/209.3\approx6.15$，正好吻合。但本文前面实际给出的&quot;213 MWh&quot;，用的是本文架构推导出的总 FLOPs（$\approx3.19\times10^{23}$，比 Patterson 论文的 $3.14\times10^{23}$ 高约 1.5%～2.5%，具体数字取决于用两位有效数字的 $3.4\times10^{18}$ 还是未舍入的单 step FLOPs，前面已经提到这个差异），所以 $1287/213\approx6.04$，比 6.15 略低——这个几个百分点量级的差距来自两份总 FLOPs 估算之间本身的小偏差，不是三因子分解本身有问题。</p>
+<p><strong>需要提醒</strong>：24.6 TFLOP/s 和 330W 都是 Patterson 论文针对<strong>同一个 GPT-3 训练配置</strong>给出的数字——论文并没有明确说明这两个数字是否来自严格同步采样的测量，&quot;同时测得&quot;这个说法比论文实际能支持的证据更强，更准确的说法是&quot;论文针对同一训练场景分别给出的吞吐和功率输入参数&quot;。但可以确定的是，功耗本身会随利用率、频率和负载变化而变化，这两个数字不是各自独立、可以任意搭配的常数；125 TFLOP/s 和 300W 则来自规格表，属于另一种性质的数字。上面的三项分解适合用来&quot;解释 1,287 MWh 这个数字是怎么拼出来的&quot;，但不代表这三个乘数在物理上彼此独立、可以脱离具体工作负载单独存在。另外，训练失败重启、超参数搜索试验、数据预处理等额外能耗，未必完整体现在&quot;一次成功训练&quot;的 24.6 TFLOP/s 里，这部分的不确定性本文没有进一步展开。</p>
+<p>具体验算（用论文给出的真实吞吐和系统功率）：</p>
+<p>$$\frac{3.14\times10^{23}}{24.6\times10^{12}/330\text{W}} \div 3.6\times10^6 \approx 1{,}170\text{ MWh}$$</p>
+<p>再乘上论文给出的 PUE（约 1.10）：</p>
+<p>$$1{,}170\times1.10\approx\textbf{1,287 MWh}$$</p>
+<p>这几乎精确地还原出了 1,287 MWh 这个数字——说明它不是电表读数意义上的&quot;实测总能耗&quot;，而是<strong>论文基于已发布的实际训练吞吐、系统功率和 PUE 反推得到的公开估算值</strong>。</p>
+<h3>论文给出的估算数据</h3>
+<p>这几个数字<strong>来自两篇不同的论文，统计口径也不同，不能混为一谈</strong>：Patterson 等人的研究估算 GPT-3 训练约消耗 <strong>1,287 MWh</strong> 电力，对应碳排放超过 <strong>550 公吨 CO₂e</strong>——这两项是同一篇论文基于训练配置反推得到的估算值，不是电表实测读数。<strong>700 千升水</strong>则来自另一篇专门研究 AI 水耗的论文，指的是特定美国数据中心场景下的<strong>直接蒸发淡水消耗量估算</strong>，不是 GPT-3 完整水足迹（比如没有计入发电环节的间接耗水），也不是 Patterson 论文的结论——这里只是把两篇论文各自的估算数字放在一起参考，不代表它们是同一套统计口径下的数字。700,000 升水相当于一个标准奥运游泳池（约 250 万升）的 <strong>28%</strong>，不是三分之二。</p>
+<p>网上常见&quot;训练 GPT-4 的用电量是 GPT-3 的约 16.5 倍&quot;这类说法，但 OpenAI 的 GPT-4 技术报告没有公开模型规模、训练硬件配置、训练时长或能耗数据，这个倍数无法从任何官方披露的数字推导或验证，本文不采用这个未经证实的具体数字。</p>
+<h3>大规模长期部署下，累计推理能耗可能超过一次训练</h3>
+<p>&quot;推理占模型生命周期能源 90%&quot;不是针对 GPT-3 或 GPT-4o 单独测得的结论，而是 Patterson 论文里引用的<strong>行业总体口径</strong>（NVIDIA 对机器学习工作负载的估计约 80%～90%，AWS 对云端机器学习需求的估计约 90%），不保证适用于每一个具体模型。是否超过训练能耗，实际取决于&quot;调用次数 × 每次推理能耗 × 服务年限&quot;这三者的乘积——只有当一个模型被大规模、长期地持续调用时，累计推理能耗才可能超过一次训练，不是任何模型都必然如此。</p>
 <ul>
-<li>每次 GPT-4o 查询约消耗 <strong>0.3 Wh</strong></li>
-<li>ChatGPT 每天约 1 亿次查询：$1\text{亿} \times 0.3\text{Wh} = \textbf{30,000 kWh/天}$</li>
-<li>一年约 <strong>4 GWh</strong>，是 GPT-3 训练用电量的 <strong>3 倍</strong></li>
+<li>每次 GPT-4o 查询约消耗 <strong>0.3 Wh</strong>（这个数字高度依赖输入/输出长度、批处理效率和具体硬件，是一个粗略的参考估算，不是每次查询的固定值）</li>
+<li>ChatGPT 每天约 1 亿次查询（同样是一个粗略的规模假设，<strong>且已经落后于最新披露的规模</strong>——OpenAI 2025 年公开信息显示其平台每天的消息量已超过 25 亿条；这里仍用 1 亿次只是为了演示&quot;调用次数 × 单次能耗 × 服务年限&quot;这个计算框架，不代表当前 ChatGPT 的真实调用规模，也不能直接把 25 亿乘以 0.3Wh 当作现实用电量——真实模型、请求长度和服务类型都不同）：$1\text{亿} \times 0.3\text{Wh} = \textbf{30,000 kWh/天}$</li>
+<li>一年：$30{,}000 \times 365 = 10{,}950{,}000\text{ kWh} \approx \textbf{10.95 GWh}$（这是&quot;每次 0.3Wh、每天 1 亿次&quot;这两个假设条件下的<strong>情景推算</strong>，不是任何厂商公布或实测的 ChatGPT 年度实际用电量），是 GPT-3 训练估算用电量（1,287 MWh $=$ 1.287 GWh）的约 <strong>8.5 倍</strong></li>
 </ul>
 <h3>完整换算链条</h3>
-<pre><code>总 FLOPs（计算量）
-   ÷ 硬件能效（FLOP/s per Watt）
-   = 理论最低电能（焦耳）
+<p>这条链条最容易出错的地方，是把&quot;要不要走某一步&quot;和&quot;硬件能效用的是哪种口径&quot;混在一起。分两条路径看会更清楚——两条路径不能混用其中的步骤：</p>
+<p><strong>路径 A：从 GPU 芯片规格表出发</strong>（比如 125 TFLOP/s 峰值 ÷ 300W 芯片 TDP）</p>
+<pre><code>总 FLOPs
+   ÷ (峰值 FLOP/s ÷ GPU 芯片 TDP)         [得到 GPU 芯片层面、假设 100% 利用率的理论能耗]
+   × (1 / 实际利用率 u)                   [u = 实际吞吐/峰值吞吐，不要套用一个通用范围；本文 GPT-3 训练 u≈24.6/125≈0.20，具体数值取决于模型、硬件和并行策略，应由实测或明确假设给出]
+   × (服务器 IT 实际总功耗 ÷ 第一步用的 GPU TDP/规格功率)     [分母必须是第一步&quot;÷&quot;里用的那个 GPU 规格功率（比如 300W TDP），不是重新测量的 GPU 实际功耗——这一步是把&quot;规格表 TDP&quot;这个口径换算到&quot;服务器 IT 设备实际功耗&quot;口径，补上 CPU、内存、网卡、风扇等其他部件；没有通用系数，需按具体服务器配置估算]
+   × PUE                                 [IT 设备能耗 → 数据中心总能耗]
    ÷ 3,600,000
-   = 理论最低电度数（kWh）
-   × PUE（数据中心效率系数，通常 1.2～1.5）
-   × 实际 GPU 利用率修正（通常除以 0.3～0.5）
    = 实际用电量（kWh）
-   × 当地电网碳强度（kg CO₂/kWh）
-   = 碳排放量</code></pre>
+</code></pre>
+<p><strong>路径 B：直接用系统级实测吞吐和功耗</strong>（比如 Patterson 论文的 24.6 TFLOP/s ÷ 330W——论文说明 330W 已经包含内存、网卡、风扇和主机 CPU 的分摊）</p>
+<pre><code>总 FLOPs
+   ÷ (实测 FLOP/s ÷ 系统实测功耗)          [利用率损失、&quot;芯片→IT设备&quot;这两步都已经包含在这个实测数字本身里，不要再重复乘]
+   × PUE                                 [IT 设备能耗 → 数据中心总能耗]
+   ÷ 3,600,000
+   = 实际用电量（kWh）
+</code></pre>
+<p>$$\text{碳排放量} = \text{实际用电量（kWh）}\times\text{当地电网碳强度（kg CO}_2\text{/kWh）}$$</p>
+<p><strong>PUE 的取值范围要看数据中心类型</strong>：较旧或普通数据中心常见 1.2～1.5；效率较高的 hyperscale 数据中心可以低至 1.1 左右——本文 GPT-3 示例用的 1.10 属于后一种，和&quot;1.2～1.5&quot;这个更宽泛的范围并不矛盾，只是对应不同类型的设施，不是同一个数字。</p>
 <h3>硬件能效在快速提升</h3>
-<p>GPU 的每瓦 FLOP/s 从 2010 年到 2024 年以每年约 <strong>1.28 倍</strong>的速度提升。如果延续，到 2030 年代末训练效率将提升 <strong>4 倍</strong>。</p>
+<p>硬件能效的提升速度，即使是同一家机构（Epoch AI）不同口径的研究，给出的数字也不一样：一项针对<strong>领先硬件、Tensor FP16 口径</strong>的统计给出&quot;每两年翻一倍&quot;，对应年化增长率 $2^{1/2}-1\approx41\%$；另一项按 <strong>FP32 FLOP/s ÷ TDP</strong>、覆盖更宽硬件样本（含普通 GPU 与 ML GPU）的研究给出翻倍周期约 2.7～3 年，对应年化增长率 $2^{1/2.7}-1\approx29\%$ 到 $2^{1/3}-1\approx26\%$，即约 <strong>26%～29%</strong>。可以确认的差异包括：是否只取领先设备、精度口径（Tensor FP16 vs FP32）、样本范围和时间窗口；至于两项研究的 TDP 估算方式是否也不同，本文没有找到足够的方法细节来确认，不做这个归因。本文之前提到的&quot;年化约 28%&quot;这个数字，数值上落在 26%～29% 这个区间内，但完整来源本文仍无法核实——仅凭数值接近不能判断它具体出自哪项研究，也可能来自其他数据集、置信区间近似，或连续/复合增长率的混用，这里不做进一步推测。另外，不管用哪个增长率，历史上的效率提升速度都不能直接当作对未来硬件效率的可靠预测，只是机械外推。</p>
+<p>（如果只是想看&quot;假设年化 28% 延续会怎样&quot;这个数学示例：6 年约提升 $1.28^6\approx4.4$ 倍，14 年约提升 $1.28^{14}\approx31.7$ 倍——两者差一个数量级，说明&quot;提升 4 倍&quot;这类结论对时间窗口非常敏感，本文不再展开，也不建议把这类未经核实的外推当作硬件趋势的结论来引用。）</p>
 <hr />
+<h2 id="sec6">六、反向传播与训练机理</h2>
+<p>本章沿着前向传播的同一条链路倒着计算梯度，说明训练代码中 <code>loss.backward()</code> 实际完成了什么，并展开前文“反向传播约为前向两倍”的来源。数值演示使用一个独立的 toy 模型（3 个 token“黑猫睡”、单头、<code>head_dim=2</code>），因为前向章节中的 128 维向量使用省略号表示，不能直接用于精确手算。本文统一采用 GPT-3 的词表大小 $|V|=50{,}257$。</p>
+<h3>6.0 两条贯穿全文的规则（外加一条容易和它们搞混的操作）</h3>
+<ol>
+<li><strong>链式法则</strong>：$y=f(x)$，已知 $\dfrac{\partial L}{\partial y}$，则 $\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y}\cdot\dfrac{\partial y}{\partial x}$。</li>
+<li><strong>分支相加</strong>：如果<strong>同一个变量</strong> $x$ 在前向传播中被多个地方使用（比如同一个 $x$ 既算 $y_1=f_1(x)$ 又算 $y_2=f_2(x)$），反向传播时 $x$ 收到的梯度是<strong>所有分支梯度之和</strong>。</li>
+</ol>
+<p>这条规则在 GPT-3 里会在三个地方出现：<strong>残差连接</strong>（$x$ 同时走了 $F(x)$ 支路和跳过 $F$ 的直连支路）、<strong>因果注意力</strong>（一个位置 $j$ 的 $K_j,V_j$ 会被它自己以及后面<strong>被 attention mask 允许连接</strong>的 query 共同读取，梯度要跨这些 query 累加——在稠密因果注意力下这是&quot;后面所有位置&quot;，但 GPT-3 实际用到的局部带状稀疏层里通常只是后面一部分被掩码允许的 query，不是全部；这一点即使不用 GQA、只是标准 MHA 也一样成立；严格说具体范围取决于 attention mask 集合 $\mathcal M$ 怎么定，第五节 5.4 会展开确切条件，不是&quot;因果&quot;这个词本身逻辑上保证&quot;后面所有位置&quot;这么强的结论）；再加上第三节会讲到的<strong>权重共享</strong>（$E$ 同时被输入查表和 Unembedding 两处使用）。</p>
+<p><strong>容易混淆的第三种情况——加法节点反向</strong>：如果 $y=a+b$，其中 $a,b$ 是<strong>两个不同的变量</strong>（不是同一个变量被用了两次），反向只是把上游梯度原样<strong>复制</strong>给两边：$da=dy,\ db=dy$，不涉及&quot;多个分支求和到同一个变量&quot;。第六节的 $x_0=E[\text{token\_id},:]+P[\text{pos},:]$ 就是这种情况——$E$ 的这一行和 $P$ 的这一行是两个不同的变量，各自拿到一份<strong>相同</strong>的梯度副本，这是加法节点的性质，和&quot;分支相加&quot;规则不是一回事（两者都涉及&quot;一个节点收到梯度&quot;，但加法节点是复制，分支相加是求和）。</p>
+<hr />
+<h3>6.1 一次训练 step 的完整链路</h3>
+<pre><code>X (输入 token ids)
+   │
+   ▼ forward（前向文档已讲）
+logits [1, seq_len, 50257]
+   │
+   ▼ Loss（交叉熵，与 target token 比较）
+L（标量）
+   │
+   ▼ backward（本文要讲的部分）
+dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
+   │
+   ▼ optimizer.step()
+</code></pre>
+<p><strong>需要注意</strong>：token id 是离散整数，没有梯度可言。反向传播链路真正的终点是 Embedding 查表之后那个连续向量的梯度，最终落到 Token Embedding 矩阵 $E$ 和 Position Embedding 矩阵 $P$ 本身（第六节）——链路在&quot;查表 + 相加&quot;这个操作处就结束了。</p>
+<hr />
+<h3>6.2 起点：Loss 对 logits 的梯度</h3>
+<p>和前向文档一致，交叉熵 + softmax 组合求导：</p>
+<p>$$\frac{\partial L}{\partial \text{logits}_i} = p_i - y_i, \qquad p=\text{softmax}(\text{logits})$$</p>
+<p><strong>小例子</strong>（词表只有 4 个词，方便手算）：logits $=[1.5, 0.2, -0.3, 0.8]$，target 是第 0 个词。</p>
+<p>$$p=\text{softmax}([1.5,0.2,-0.3,0.8]) \approx [0.5170,\ 0.1409,\ 0.0855,\ 0.2567]$$</p>
+<p>$$\frac{\partial L}{\partial \text{logits}} = p-[1,0,0,0] \approx [-0.4830,\ 0.1409,\ 0.0855,\ 0.2567]$$</p>
+<p><strong>校验</strong>：$p$ 之和 $=1$（$0.5170+0.1409+0.0855+0.2567=1.0001\approx1$ ✓，末位是舍入误差），梯度之和 $=0$（$-0.4830+0.1409+0.0855+0.2567=0.0001\approx0$ ✓）。</p>
+<p><strong>平均因子</strong>：上面的 $p-y$ 是单 token、未做平均时的梯度。PyTorch 的 <code>cross_entropy</code> 默认 <code>reduction=&quot;mean&quot;</code>，如果一个 batch 里有效 token 数是 $M$，实际梯度要多除一个 $M$：$\dfrac{\partial L}{\partial\text{logits}_{b,t}}=\dfrac{p_{b,t}-y_{b,t}}{M}$。用 <code>reduction=&quot;sum&quot;</code> 时才不用除。这不改变梯度方向，只改变数值尺度，但下面各节的公式默认都按不除以 $M$ 的口径推导，实现时要留意。</p>
+<blockquote>
+<p><strong>记号约定</strong>：从这里开始，公式按&quot;单个 token&quot;（一行向量）推导，形状写成 $[1,12288]$ 之类，方便对照前向文档。真实实现里所有量都还有 batch 和序列维度（$[B,S,\cdot]$）。对<strong>权重</strong>的梯度（$\partial L/\partial E,\partial L/\partial \gamma,\partial L/\partial W_Q,\dots$）都需要在 $B,S$ 两个维度上求和，因为同一份权重被所有 token 位置共用。对<strong>激活/输入</strong>的梯度不需要这样求和——但 Attention 是例外：一个位置的 $K,V$ 会被多个后续 query token 共同使用，梯度要跨 query 位置累加（具体取决于 attention mask，第五节 5.4 会具体展开确切条件）；此外 GELU、LayerNorm 这类逐 token 操作没有跨 token 依赖，但和 LLaMA-3 的 SwiGLU 不同，GPT-3 的 FFN 只有一条路径（$W_1\to\text{GELU}\to W_2$），不需要处理&quot;分支相加&quot;。</p>
+</blockquote>
+<hr />
+<h3>6.3 Unembedding（$U$）反向</h3>
+<p><strong>GPT-3 沿用 GPT-2 架构，Embedding 和 Unembedding 权重是共享的</strong>（weight tying，$U=E^\top$）：这个结论的依据是 OpenAI 官方 GPT-2 实现直接用输入词嵌入矩阵 <code>wte</code> 的转置去算 logits，且 GPT-3 论文明确说明除了稀疏注意力这一处改动外沿用 GPT-2 架构——这是<strong>架构和代码层面的证据</strong>，是判断权重共享与否的主要依据。</p>
+<p>参数量并不能独立证明这一点：把 bias、LayerNorm 的 $\gamma,\beta$、Position Embedding 都按本文采用的架构配置算进去估算（GPT-3 论文没有公开完整的实现细节，部分配置是按 GPT-2 架构推断的），共享权重时总参数量约 174.6B，不共享时约 175.2B——两者四舍五入到十亿这个精度都是&quot;175B&quot;，<strong>不能靠总参数量是否对上标称值来反推是否共享</strong>，前向文档&quot;合计约 1750 亿&quot;这句话对两种情况都成立，只能当作一个大致的相容性检查，不是证据。所以下面的推导按 GPT-2/GPT-3 的真实架构，默认 $U=E^\top$。</p>
+<p>前向：$\text{logits}=h_\text{final}\cdot E^\top,\quad E:[50257,\ 12288]$</p>
+<p>$$\frac{\partial L}{\partial h_\text{final}} = \frac{\partial L}{\partial\text{logits}}\cdot E \quad [1,50257]\times[50257,12288]\to[1,12288]$$</p>
+<p>$$\frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支} = \left(h_\text{final}^\top\cdot\frac{\partial L}{\partial\text{logits}}\right)^{\!\top} \quad [50257,12288]$$</p>
+<p>（因为 $\text{logits}=h_\text{final}E^\top$，对 $E$ 求导要多转置一次，形状上和&quot;$U$ 独立存在&quot;时的 $\partial L/\partial U:[12288,50257]$ 正好是转置关系。）</p>
+<p>上式是单个 token 的贡献，真正的梯度要对所有 $b,t$ 求和：$\dfrac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\left(h_{b,t}^\top\dfrac{\partial L}{\partial\text{logits}_{b,t}}\right)^{\!\top}$。</p>
+<p><strong>关键点——分支相加</strong>：因为 $E$ 被用了两次（一次是这里的 Unembedding，一次是第六节的输入查表），$E$ 最终收到的梯度是两份之和：</p>
+<p>$$\frac{\partial L}{\partial E} = \frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支} + \frac{\partial L}{\partial E}\Big|_\text{查表分支（第六节）}$$</p>
+<blockquote>
+<p>如果某个实现选择不共享权重（$U$ 是独立参数），上面的推导会退化成&quot;对 $U$ 单独求梯度、不需要和查表分支相加&quot;这个更简单的情况——如上所述，这种情况下的总参数量（约 175.2B）同样能四舍五入成&quot;175B&quot;，参数量本身不能用来排除这种可能；本文按 GPT-2/GPT-3 论文和官方代码给出的真实架构，以共享权重为主线。</p>
+</blockquote>
+<hr />
+<h3>6.4 LayerNorm 反向</h3>
+<p>前向（复习）：</p>
+<p>$$\mu=\frac1d\sum_i x_i,\quad \sigma^2=\frac1d\sum_i(x_i-\mu)^2,\quad \text{std}=\sqrt{\sigma^2+\epsilon}$$</p>
+<p>$$\hat x_i=\frac{x_i-\mu}{\text{std}},\qquad y_i=\gamma_i\hat x_i+\beta_i$$</p>
+<p><strong>对 $\gamma,\beta$ 的梯度</strong>（单个 token，逐元素；真实实现要再对 $b,t$ 求和）：</p>
+<p>$$\frac{\partial L}{\partial\beta_i}=\frac{\partial L}{\partial y_i}, \qquad \frac{\partial L}{\partial\gamma_i}=\frac{\partial L}{\partial y_i}\cdot\hat x_i$$</p>
+<p><strong>对输入 $x$ 的梯度</strong>：这是 LayerNorm 比 RMSNorm 麻烦的地方——$\mu$ 和 $\sigma^2$ 都依赖<strong>全部</strong> $x_i$，所以 $x_j$ 的变化会通过两条路径影响所有 $\hat x_i$。记 $g_i=\dfrac{\partial L}{\partial y_i}\cdot\gamma_i$（先把缩放吸收掉），结果是：</p>
+<p>$$\frac{\partial L}{\partial x_j} = \frac{1}{\text{std}}\left[g_j - \frac1d\sum_i g_i - \frac{\hat x_j}{d}\sum_i g_i\hat x_i\right]$$</p>
+<p><strong>直觉</strong>：第一项 $g_j/\text{std}$ 是&quot;当作没有归一化&quot;的梯度；第二项 $-\frac1d\sum_i g_i$ 来自&quot;减均值&quot;这一步的耦合（所有维度共享同一个 $\mu$）；第三项 $-\frac{\hat x_j}{d}\sum_i g_i\hat x_i$ 来自&quot;除以标准差&quot;这一步的耦合，结构上和 RMSNorm 里的修正项同源。<strong>作为记忆方式</strong>：可以说&quot;LayerNorm 反向比 RMSNorm 多出中间这一项'减均值'的耦合&quot;——RMSNorm 去掉了减均值这一步，反向公式也就少了这一项。<strong>但严格来说这不是一个精确的算式恒等关系</strong>：LayerNorm 的 $\hat x_i=(x_i-\mu)/\sigma$ 是中心化变量，方差 $\sigma^2$ 也是围绕均值算的；RMSNorm 用的是未中心化的 $x_i/\text{RMS}(x)$，分母也不是围绕均值的标准差。也就是说第一项和第三项虽然形式相似，但两者依赖的标准化变量和统计量本身不同——不能理解成&quot;从 LayerNorm 公式里直接删掉中间那一项就精确等于 RMSNorm 公式&quot;，这里说的&quot;多出一项&quot;只是一个方便记忆的近似类比。</p>
+<blockquote>
+<p>这个公式在 96 层模型里一共要用 $96\times2+1=193$ 次（每个 Block 2 次，加 1 次 Final LayerNorm）。</p>
+</blockquote>
+<hr />
+<h3>6.5 96 层 Block 反向：从最后一层往前，重复 96 次</h3>
+<p>GPT-3 用 <strong>Pre-LN</strong>（LayerNorm 在 Attention/FFN 之前），和 LLaMA-3 的 Pre-RMSNorm 结构完全一样，只是把 RMSNorm 换成 LayerNorm、把 SwiGLU 换成 GELU、没有 RoPE（位置信息是在输入端<strong>相加</strong>的，见第六节）、没有 GQA（K/V head 数等于 Q head 数，不需要处理&quot;一个 KV head 被多个 Q head 共享&quot;）。</p>
+<h4>6.5.1 残差连接反向——两次合并写清楚</h4>
+<p>一个 Block 的输入是 $x$，第一次残差输出 $u=x+\text{Attention}(\text{LN}_1(x))$，第二次残差输出 $y=u+\text{FFN}(\text{LN}_2(u))$。记 $g_y=\partial L/\partial y$ 是从下一层传回来的梯度：</p>
+<p>$$g_u = \underbrace{g_y}_{\text{直通残差}} + \underbrace{J_{\text{LN}_2}^\top J_{\text{FFN}}^\top g_y}_{\text{FFN 分支（5.2+5.3）}}$$</p>
+<p>$$g_x = \underbrace{g_u}_{\text{直通残差}} + \underbrace{J_{\text{LN}_1}^\top J_{\text{Attention}}^\top g_u}_{\text{Attention 分支（5.4+5.5）}}$$</p>
+<p>和 LLaMA-3 那份文档一样要提醒一句：残差保证&quot;存在一条传递系数恒为 1 的直通路径&quot;，但不保证最终梯度一定不衰减——直通梯度和分支梯度是<strong>相加</strong>关系，方向相反时仍可能相互抵消。</p>
+<h4>6.5.2 FFN（GELU）反向——比 SwiGLU 简单，只有一条路径</h4>
+<p>前向（$u$ 是残差流，$\hat u=\text{LN}_2(u)$）：</p>
+<p>$$z=\hat u W_1,\qquad a=\text{GELU}(z),\qquad Y=aW_2$$</p>
+<p>倒着算：</p>
+<p>$$\frac{\partial L}{\partial a}=\frac{\partial L}{\partial Y}W_2^\top,\qquad \frac{\partial L}{\partial W_2}=a^\top\frac{\partial L}{\partial Y}$$</p>
+<p>GELU 反向，需要 GELU 的导数。精确形式 $\text{GELU}(x)=x\cdot\Phi(x)$（$\Phi$ 是标准正态分布的累积分布函数，$\varphi$ 是对应的密度函数）：</p>
+<p>$$\text{GELU}'(x)=\Phi(x)+x\cdot\varphi(x)$$</p>
+<p>$$\frac{\partial L}{\partial z}=\frac{\partial L}{\partial a}\odot\text{GELU}'(z)$$</p>
+<p>$$\frac{\partial L}{\partial \hat u}=\frac{\partial L}{\partial z}W_1^\top,\qquad \frac{\partial L}{\partial W_1}=\hat u^\top\frac{\partial L}{\partial z}$$</p>
+<blockquote>
+<p>GPT-2 官方开源实现确认使用的是 tanh 近似版 GELU（$0.5x(1+\tanh(\sqrt{2/\pi}(x+0.044715x^3)))$）；GPT-3 的训练代码没有公开，论文只说&quot;沿用 GPT-2 的架构&quot;，这里假设 GPT-3 同样用 tanh 近似版是一个基于这句话的合理推断，不是已经证实的 GPT-3 官方实现细节。导数形式更复杂，但框架的自动微分会自动处理，不需要手推——这里给出精确版的导数是为了说明原理，两者数值上非常接近。</p>
+</blockquote>
+<p>因为 FFN 只有一条路径（不像 SwiGLU 有 gate/up 两条支路），这里不需要&quot;分支相加&quot;这一步。</p>
+<blockquote>
+<p><strong>省略 bias 的说明</strong>：前向文档明确指出 GPT-3 的投影实际是 $xW+b$，本文和前向文档一样，为了简化只推导 $W$ 的梯度，没有单独写 $b$ 的梯度——这里补一句：bias 的反向极其简单，对任意一个线性层 $Z=XW+b$，都是把该层自己的上游梯度按 $b,t$ 直接求和，$\dfrac{\partial L}{\partial b}=\sum_{b,t}\dfrac{\partial L}{\partial Z_{b,t}}$（这里的 $Z$ 泛指&quot;这一层自己的输出&quot;，不是特指上面 FFN 小节里的 $Y$——比如 $W_2$ 的 bias 对 $dY$ 求和，$W_1$ 的 bias 对 $dz$ 求和，$W_Q$ 的 bias 对 $dq_\text{proj}$ 求和，$W_K,W_V$ 同理对各自的投影输出求和，$W_O$ 的 bias 对 $d\text{attn\_out}$ 求和），对 $W_Q,W_K,W_V,W_O,W_1,W_2$ 每一个都适用同样的原理，只是代入各自层的输出梯度，不需要额外推导。本文后续所有小节都沿用这个简化，不再逐处重复声明。</p>
+</blockquote>
+<h4>6.5.3 第二个 LayerNorm 反向</h4>
+<p>套用第四节公式，把 $\partial L/\partial\hat u$ 转成 $g_u^{(\text{FFN})}=\partial L/\partial u$——这是 5.1 里 $J_{\text{LN}_2}^\top J_{\text{FFN}}^\top g_y$ 这一整项。</p>
+<p>$$g_u = g_y + g_u^{(\text{FFN})}$$</p>
+<p>这个 $g_u$ 交给 Attention 分支（5.4～5.5）。</p>
+<h4>6.5.4 多头注意力反向——toy 数值演示</h4>
+<p>GPT-3 是标准 MHA（96 个 Q head，96 个 K/V head，一一对应），比 LLaMA-3 的 GQA 简单：不需要处理&quot;一个 KV head 被多个 Q head 共享&quot;的梯度累加，但<strong>跨 query token 的累加依然存在</strong>（对稠密因果注意力、或存在重叠连接的稀疏注意力都成立，见下面的范围说明）——这一层累加和用不用 GQA 无关。</p>
+<blockquote>
+<p><strong>范围说明</strong>：下面的推导都按<strong>稠密因果注意力</strong>（每个 query 能看到它之前的所有位置）展开。GPT-3 论文 2.1 节提到，真实的 96 层里是稠密注意力和局部带状稀疏注意力（locally banded sparse attention，类似 Sparse Transformer）交替出现的，不是每一层都是完整的稠密因果注意力。对于稀疏层，(b)(e) 里的求和范围 $\sum_{i\ge j}$ 要收紧成&quot;只对允许连接的 query 集合 $\mathcal M$ 求和&quot;：$dV_j=\sum_{i:(i,j)\in\mathcal M}\alpha_{ij}\,do_i$，$dK_j$ 同理。公式形式一样，只是求和范围更窄——下面的推导对稠密层完全适用，但不能不加说明地代表 GPT-3 全部 96 层。</p>
+</blockquote>
+<p><strong>toy 模型设置</strong>：3 个 token&quot;黑猫睡&quot;，单头，<code>head_dim=2</code>（为了手算干净，只用 1 个头；真实 GPT-3 是 96 个头各自独立重复这一套计算，最后拼接）。</p>
+<ul>
+<li>$q_1=[1,0],\ q_2=[0,1],\ q_3=[1,1]$</li>
+<li>$k_1=v_1=[1,0]$（黑），$k_2=v_2=[0,1]$（猫），$k_3=v_3=[1,1]$（睡）</li>
+<li>因果掩码：位置 1 只能看 1；位置 2 能看 1,2；位置 3 能看 1,2,3。</li>
+</ul>
+<p><strong>前向数值</strong>（$\sqrt{d_\text{head}}=\sqrt2\approx1.414$）：</p>
+<table>
+<thead>
+<tr>
+  <th>query</th>
+  <th>scores（除以 $\sqrt2$）</th>
+  <th>softmax</th>
+  <th>输出 $=\sum\alpha_j v_j$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>$q_1$</td>
+  <td>$[0.707]$（只有位置1）</td>
+  <td>$[1.000]$</td>
+  <td>$v_1=[1,\ 0]$</td>
+</tr>
+<tr>
+  <td>$q_2$</td>
+  <td>$[0,\ 0.707]$</td>
+  <td>$[0.330,\ 0.670]$</td>
+  <td>$[0.330,\ 0.670]$</td>
+</tr>
+<tr>
+  <td>$q_3$</td>
+  <td>$[0.707,\ 0.707,\ 1.414]$</td>
+  <td>$[0.248,\ 0.248,\ 0.503]$</td>
+  <td>$[0.752,\ 0.752]$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>假设</strong>下游梯度 $\partial L/\partial o_i=[1,0]$，对 $i=1,2,3$ 都一样（简化假设，真实值来自 O 投影反向）。</p>
+<h5>(a) O 投影反向 + concat 拆分</h5>
+<p>$$\frac{\partial L}{\partial\text{attn\_concat}}=\frac{\partial L}{\partial\text{attn\_out}}W_O^\top,\qquad \frac{\partial L}{\partial W_O}=\text{attn\_concat}^\top\frac{\partial L}{\partial\text{attn\_out}}$$</p>
+<p>concat 反向就是按 96 个 head 的边界 split，得到每个 head、每个 token 位置的 $\partial L/\partial o_i$。</p>
+<h5>(b) 对 V 的梯度——跨 query token 累加（无需 GQA，标准因果注意力就有）</h5>
+<p>$$\frac{\partial L}{\partial v_j}=\sum_{i\ge j}\alpha_{i,j}\cdot\frac{\partial L}{\partial o_i}$$</p>
+<p>代入数字：</p>
+<p>$$dV_1=\alpha_{11}do_1+\alpha_{21}do_2+\alpha_{31}do_3=(1+0.330+0.248)\,[1,0]=[1.578,\ 0]$$</p>
+<p>$$dV_2=\alpha_{22}do_2+\alpha_{32}do_3=(0.670+0.248)\,[1,0]=[0.918,\ 0]$$</p>
+<p>$$dV_3=\alpha_{33}do_3=0.503\,[1,0]=[0.503,\ 0]$$</p>
+<p><strong>直觉</strong>：位置 1（&quot;黑&quot;）被 3 个 query 读取，梯度是 3 项之和；位置 3（&quot;睡&quot;）只被自己读取，梯度只有 1 项——<strong>越靠前的位置被越多后续 token 依赖，反向梯度的累加项也越多</strong>，这是稠密因果注意力的结构性质（存在重叠连接的稀疏掩码下也成立，见下面的范围说明），标准 MHA 和 GQA 都一样。</p>
+<h5>(c) 对 softmax 输入的梯度——一个容易被忽略的边界情况</h5>
+<p>标准公式：$\dfrac{\partial L}{\partial s_j}=\alpha_j\left(\dfrac{\partial L}{\partial\alpha_j}-\sum_l\alpha_l\dfrac{\partial L}{\partial\alpha_l}\right)$</p>
+<p><strong>query 1 的特殊情况</strong>：位置 1 因果掩码下只能看自己，softmax 退化成对<strong>单个元素</strong>做归一化，$\alpha_{11}\equiv1$ 恒成立、与 score 数值无关。代入公式：$ds_{11}=1\times(d\alpha_{11}-1\times d\alpha_{11})=0$，<strong>恒等于 0</strong>——也就是说 $q_1$ 对自己的 score 反向梯度永远是 0，$dQ_1=0$，$K_1$ 也不会从这一条路径收到梯度。这不是算错了，而是&quot;只能看见一个元素的 softmax 的导数恒为 0&quot;这个数学性质本身。</p>
+<p>query 2（$d\alpha_{21}=do_2\cdot v_1=1,\ d\alpha_{22}=do_2\cdot v_2=0$）：</p>
+<p>$$\textstyle\sum_l\alpha_ld\alpha_l=0.330\times1=0.330$$
+$$ds_{21}=0.330(1-0.330)=0.221,\qquad ds_{22}=0.670(0-0.330)=-0.221$$</p>
+<p>校验：$ds_{21}+ds_{22}\approx0$ ✓</p>
+<p>query 3（$d\alpha_{31}=1,\ d\alpha_{32}=0,\ d\alpha_{33}=do_3\cdot v_3=1$）：</p>
+<p>$$\textstyle\sum_l\alpha_ld\alpha_l=0.248+0.503=0.751$$
+$$ds_{31}=0.248(1-0.751)=0.0616,\quad ds_{32}=0.248(0-0.751)=-0.1866,\quad ds_{33}=0.503(1-0.751)=0.1250$$</p>
+<p>校验：$0.0616-0.1866+0.1250\approx0$ ✓</p>
+<p>除以 $\sqrt2$ 换算成对 $(q_i\cdot k_j)$ 的梯度：$d(q_2k_1)=0.1564,\ d(q_2k_2)=-0.1564$；$d(q_3k_1)=0.0436,\ d(q_3k_2)=-0.1320,\ d(q_3k_3)=0.0884$。</p>
+<h5>(d) 对 Q 的梯度（对该 query 能看到的所有 key 求和，但不需要跨多个 query 累加）</h5>
+<p><strong>这里需要先说明标题的准确含义，避免和下面的求和公式看起来矛盾</strong>：$dQ_i$ 确实需要对 query $i$ 能看到的<strong>所有 key</strong> 求和（下面 $dQ_3$ 就是三项 $k_1,k_2,k_3$ 的和），这一点和 $dK_j,dV_j$ 没有本质区别；&quot;不需要累加&quot;指的是另一件事——$Q_i$ 只在它自己这一个 query 位置被用来算 score，不会像 $K_j,V_j$ 那样被后面<strong>其他 query 位置</strong>重复读取，所以不需要像 (b)(e) 那样跨多个 query token 累加。简言之：$dQ_i$ 要对&quot;key 维度&quot;求和，但不需要对&quot;query 维度&quot;累加。</p>
+<p>$$dQ_1=[0,0]\quad(\text{见 (c) 的边界情况})$$</p>
+<p>$$dQ_2=d(q_2k_1)\,k_1+d(q_2k_2)\,k_2=0.1564[1,0]-0.1564[0,1]=[0.1564,\ -0.1564]$$</p>
+<p>$$dQ_3=d(q_3k_1)\,k_1+d(q_3k_2)\,k_2+d(q_3k_3)\,k_3=[0.0436+0.0884,\ -0.1320+0.0884]=[0.1320,\ -0.0436]$$</p>
+<h5>(e) 对 K 的梯度——同样跨 query token 累加</h5>
+<p>$$dK_j=\sum_{i\ge j}d(q_ik_j)\,q_i$$</p>
+<p>$$dK_1=\underbrace{0}_{\text{来自 }q_1}+d(q_2k_1)q_2+d(q_3k_1)q_3=0.1564[0,1]+0.0436[1,1]=[0.0436,\ 0.2000]$$</p>
+<p>$$dK_2=d(q_2k_2)q_2+d(q_3k_2)q_3=-0.1564[0,1]-0.1320[1,1]=[-0.1320,\ -0.2884]$$</p>
+<p>$$dK_3=d(q_3k_3)q_3=0.0884[1,1]=[0.0884,\ 0.0884]$$</p>
+<p><strong>这就是标准 MHA 里&quot;跨 query token 累加&quot;的完整体现</strong>：$K_1$ 收到来自 $q_1,q_2,q_3$ 三条路径的梯度（$q_1$ 那条恰好是 0），$K_3$ 只收到来自 $q_3$ 自己的梯度。GPT-3 没有 GQA，所以不存在&quot;同一 KV 还要在多个 head 之间累加&quot;这一层，但<strong>跨 token</strong> 这一层累加在<strong>稠密</strong>因果注意力下始终都在。</p>
+<blockquote>
+<p>严格来说，&quot;因果&quot;本身只规定&quot;不能看未来&quot;，并不保证一个 $K_j,V_j$ 一定会被多个 query 读取——比如一个极端的稀疏掩码可以让每个 query 只看自己，这种情况下就没有跨 query 的累加。求和范围终究是由 attention mask $\mathcal M$ 决定的：稠密因果注意力下 $\mathcal M$ 让几乎每个 $K_j,V_j$ 都被多个 query 覆盖，累加自然发生；GPT-3 论文里的局部带状稀疏层通常也会在局部窗口内产生同样的重叠，所以本文的核心结论不受影响，只是不能把&quot;只要是因果注意力就一定累加&quot;说成是逻辑上必然的。</p>
+</blockquote>
+<h5>(f) Q/K/V 投影反向</h5>
+<p>和 LLaMA-3 那份文档不同，这里的 toy 例子从一开始就同时算了 $q_1,q_2,q_3$ 三个 query token（不是只固定一个），所以不需要区分&quot;单 query token&quot;和&quot;完整序列&quot;两种粒度——(d)(e) 算出的 $dQ,dK,dV$ 本来就都是按序列位置 $[S,d]$ 排列的。</p>
+<p><strong>但这里需要先说清楚一个容易混淆的形状层级问题</strong>：(d)(e) 算出来的 $dQ,dK,dV$（toy 里每个 $[S,2]$）只是<strong>单个 head</strong> 的梯度——toy 模型为了手算干净只用了 1 个头，真实 GPT-3 有 96 个头，各自独立重复 (a)~(e) 这一整套计算。要还原出完整的 $W_Q$ 梯度，需要先把 96 个头的 $dQ_h$ 沿最后一维拼接起来：</p>
+<ul>
+<li>单个玩具头：$dQ_h\in\mathbb R^{S\times2}$（本节数值例子算的就是这个）</li>
+<li>GPT-3 单个真实头：$dQ_h\in\mathbb R^{S\times128}$（$\text{head\_dim}=128$）</li>
+<li>拼接全部 96 个头之后：$dQ=\text{concat}(dQ_1,\dots,dQ_{96})\in\mathbb R^{S\times12288}$</li>
+<li>完整投影权重：$W_Q\in\mathbb R^{12288\times12288}$（96 个头共用同一个大矩阵，各自对应其中一段列切片）</li>
+<li>单头对应的权重切片：$W_Q^{(h)}\in\mathbb R^{12288\times128}$，$dW_Q^{(h)}=X^\top dQ_h$</li>
+</ul>
+<p>只有在<strong>拼接完全部 96 个头的 $dQ$</strong>之后，$X:[S,12288]$ 和 $dQ:[S,12288]$ 才对得上、可以直接写出完整 $W_Q$ 的梯度：</p>
+<p>$$\frac{\partial L}{\partial W_Q}=X^\top\frac{\partial L}{\partial q_\text{proj}},\qquad \frac{\partial L}{\partial W_K}=X^\top\frac{\partial L}{\partial k_\text{proj}},\qquad \frac{\partial L}{\partial W_V}=X^\top\frac{\partial L}{\partial v_\text{proj}}\qquad (X:[S,12288],\ q_\text{proj}\text{ 已拼接 96 头}:[S,12288])$$</p>
+<p>（本节 toy 例子只手算了 1 个头 2 维的数字，上面这组&quot;拼接后&quot;的形状公式是把 96 个头都补齐之后才成立的，不能直接把本节算出的 $[S,2]$ 数字代进 $X:[S,12288]$ 这个式子。）</p>
+<p>但真实训练里 $X$ 是三维张量 $[B,S,12288]$，&quot;$X^\top$&quot;这个记号对三维张量没有标准含义，不能直接照抄上面的写法。严谨的做法是先把 batch 和序列维合并成一维：$\bar X=\text{reshape}(X,[BS,12288])$，$\overline{dQ}=\text{reshape}(dQ,[BS,12288])$，再套用二维公式 $dW_Q=\bar X^\top\overline{dQ}$；或者直接写成指标求和形式 $(dW_Q)_{mn}=\sum_{b,t}X_{b,t,m}\,(dQ)_{b,t,n}$，两种写法等价，都比直接写&quot;$X^\top dQ$&quot;更准确。</p>
+<p>（LLaMA-3 那份文档的 toy 例子只手算了一个固定 query 位置，所以需要专门区分 $q_\text{proj}$ 的 $[1,d]$ 和 $k_\text{proj},v_\text{proj}$ 的 $[S,d]$；这里的 toy 例子把 3 个 query 都算全了，就不存在这个不对称。）</p>
+<h5>(g) 汇总：$X$（第一个 LayerNorm 输出）的总梯度</h5>
+<p>$$\frac{\partial L}{\partial X}=\frac{\partial L}{\partial X}\Big|_Q+\frac{\partial L}{\partial X}\Big|_K+\frac{\partial L}{\partial X}\Big|_V$$</p>
+<p>（按 token 位置对齐后相加，理由同 LLaMA-3 文档：每个位置的 $X$ 既是它自己 query 的输入，又是它作为 K/V 提供者的输入。）</p>
+<h4>6.5.5 第一个 LayerNorm 反向</h4>
+<p>套用第四节公式，把 $\partial L/\partial X$ 转成 $g_x^{(\text{attn})}=\partial L/\partial x\big|_\text{Attention 分支}$，再按 5.1 的公式加回 $g_u$：</p>
+<p>$$g_x=g_u+g_x^{(\text{attn})}$$</p>
+<p>$g_x$ 就是要传给上一个 Block 的完整梯度。<strong>至此一层 Block 的反向传播完整走完，96 层重复这个流程。</strong></p>
+<hr />
+<h3>6.6 Embedding + 位置编码反向</h3>
+<p>前向：$x_0=E[\text{token\_id},:]+P[\text{pos},:]$，$E$ 的这一行和 $P$ 的这一行是<strong>两个不同的变量</strong>，这是一个<strong>加法节点</strong>（不是第〇节的&quot;分支相加&quot;规则，两者的区别见第〇节末尾）：</p>
+<p>$$\frac{\partial L}{\partial E[\text{token\_id},:]}\mathrel{+}=\frac{\partial L}{\partial x_0},\qquad \frac{\partial L}{\partial P[\text{pos},:]}\mathrel{+}=\frac{\partial L}{\partial x_0}$$</p>
+<p>两个表各自拿到一份<strong>相同</strong>的梯度副本，不是各分一半。</p>
+<p><strong>Token Embedding $E$ 的完整梯度</strong>：由于第三节说明的权重共享（$U=E^\top$），$E$ 实际上收到<strong>两份</strong>梯度之和，两份的&quot;稀疏程度&quot;完全不同：</p>
+<p>$$\frac{\partial L}{\partial E} = \underbrace{\frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}}_{\text{完整的 }[V,d]\text{ 稠密矩阵，几乎每一行都非零}} + \underbrace{\text{scatter\_add}\left(\frac{\partial L}{\partial x_0}\ \text{到对应 token id 那一行}\right)}_{\text{查表分支，只有 batch 里出现过的 token id 对应的行非零}}$$</p>
+<p>Unembedding 分支是第三节那个矩阵乘法 $\left(h_\text{final}^\top\cdot\partial L/\partial\text{logits}\right)^\top$ 直接算出来的完整矩阵，不是&quot;按 token id 取一行&quot;——那是查表分支才有的操作。两者相加后，$E$ 的总梯度通常不再是稀疏的（稠密的 Unembedding 分支已经覆盖了几乎所有行）。这里要注意：即使给查表分支单独设置 <code>sparse=True</code>，也<strong>不能</strong>让 $E$ 的总梯度变稀疏——Unembedding 分支产生的稠密梯度仍然要和查表分支的梯度合并，而且 PyTorch 里能处理稀疏梯度的优化器本来就不多（比如 <code>SparseAdam</code>），&quot;一部分稀疏、一部分稠密&quot;混合处理并不是默认就能做到的事。所以更准确的结论是：查表分支单独拿出来看，数据梯度在行维度上确实是稀疏的；但只要 $E$ 和 Unembedding 权重共享，$E$ 的<strong>完整</strong>梯度通常就得按稠密处理，&quot;稀疏更新&quot;这个说法在权重共享的场景下基本不成立。</p>
+<p><strong>Position Embedding $P$ 的梯度和 $E$ 的查表分支相比谁更&quot;稀疏&quot;，需要看具体数字，不能一概而论</strong>（这里比较的是 $E$ 的查表分支，不是上一段刚说过的、已经因为权重共享而变稠密的 $E$ 总梯度）：决定 $E$ 查表分支非零行数的不是&quot;batch 大小&quot;本身，而是这个 batch 里<strong>不同 token ID 的数量</strong> $D$，非零行数最多是 $\min(D,|V|)$。GPT-3 达到完整 batch size 阶段后一个训练 batch 约 320 万 token（训练早期存在 batch 逐渐爬升的过程，并非从头到尾都是这个数字），是词表大小 50257 的 60 多倍——即便真实 token 分布是长尾的（常见词远比生僻词出现得多），这么大的 batch 也完全可能覆盖词表中的很大一部分甚至接近全部 token，具体覆盖率取决于真实的 token 频率分布，不能不看数据就断言&quot;远小于词表&quot;。$P$ 在固定 2048 长度的预训练 batch 下通常会覆盖全部 2048 个位置；但既然 $E$ 查表分支在这种大 batch 下覆盖率也可能很高，不能简单地说&quot;$P$ 的覆盖率一定远高于 $E$ 的查表分支&quot;——两者都可能接近满覆盖，只是分母不同（词表 50257 行 vs 位置表 2048 行）。这个&quot;$P$ 通常覆盖率很高&quot;的结论本身，也要限定在<strong>固定长度、或接近最大上下文长度的预训练 batch</strong>下：如果训练用了大量短序列、动态长度 batch，超出实际使用范围的那些位置行同样不会有梯度。</p>
+<p>不管这两个查表分支各自谁的覆盖率更高，真正重要的结论没有变：<strong>$E$ 的总梯度早就因为 Unembedding 分支是稠密的而变成稠密梯度了</strong>——上面这一段只是对&quot;两个查表操作各自产生的局部梯度&quot;做数学上的严谨说明，不影响 $E$ 总梯度稀疏与否的结论。</p>
+<hr />
+<h3>6.7 用代码校验公式</h3>
+<p><strong>LayerNorm 反向校验</strong>（下面这个 <code>layernorm_backward_manual</code> 只校验第四节&quot;单个 token&quot;版本的公式——代码里 <code>x=torch.randn(4)</code> 是一维的，<code>dgamma=dy*xhat</code>、<code>dbeta=dy.clone()</code> 也是按单 token 逐元素写的；如果要直接用在真实的 <code>[B,S,d]</code> 训练张量上，$\gamma,\beta$ 的梯度还需要按第四节说过的那样再对 $b,t$ 求和 $\big(d\gamma=\sum_{b,t}dy_{b,t}\odot\hat x_{b,t}\big)$，这个函数本身不会自动做这一步）：</p>
+<pre><code class="language-python">import torch
 
-<h2>六、总结</h2>
-<blockquote><p><strong>GPT-3 拥有 1750 亿参数，每个训练 step 约需 $1.67 \times 10^{18}$ 次浮点运算，一层激活值就需要 78GB 显存——这是为什么它需要数百张 GPU、数个月才能训练完成的根本原因。FLOPs 和电能之间的桥梁是硬件能效（FLOP/s per Watt）。GPT-3 训练理论用电 93 MWh，实际因散热、通信、利用率损失等开销，真实用电达 1,287 MWh——是理论值的 14 倍。推理虽然单次用电少，但因持续大规模运行，生命周期内占总用电的 90%。</strong></p></blockquote>
+def layernorm(x, gamma, beta, eps=1e-5):
+    mu = x.mean(-1, keepdim=True)
+    var = ((x - mu) ** 2).mean(-1, keepdim=True)
+    xhat = (x - mu) / torch.sqrt(var + eps)
+    return gamma * xhat + beta
+
+# 直接实现第四节的闭式公式，而不是只打印 autograd 的结果——这样才能真正校验公式本身
+def layernorm_backward_manual(dy, x, gamma, eps=1e-5):
+    d = x.shape[-1]
+    mu = x.mean(-1, keepdim=True)
+    var = ((x - mu) ** 2).mean(-1, keepdim=True)
+    std = torch.sqrt(var + eps)
+    xhat = (x - mu) / std
+    g = dy * gamma
+    dx = (g - g.mean(-1, keepdim=True) - xhat * (g * xhat).mean(-1, keepdim=True)) / std
+    dgamma = dy * xhat
+    dbeta = dy.clone()
+    return dx, dgamma, dbeta
+
+torch.manual_seed(0)
+x = torch.randn(4, requires_grad=True)
+gamma = torch.randn(4, requires_grad=True)   # 不能用全 1，见下方说明
+beta = torch.randn(4, requires_grad=True)
+w = torch.randn(4)                            # 随机下游权重，loss 不能用 y.sum()
+
+y = layernorm(x, gamma, beta)
+loss = (y * w).sum()
+loss.backward()   # loss=(y*w).sum() 时 dL/dy 就是 w
+
+dx_manual, dgamma_manual, dbeta_manual = layernorm_backward_manual(w, x.detach(), gamma.detach())
+
+print(&quot;dx     autograd vs 手推公式一致:&quot;, torch.allclose(x.grad, dx_manual, atol=1e-5))
+print(&quot;dgamma autograd vs 手推公式一致:&quot;, torch.allclose(gamma.grad, dgamma_manual, atol=1e-5))
+print(&quot;dbeta  autograd vs 手推公式一致:&quot;, torch.allclose(beta.grad, dbeta_manual, atol=1e-5))
+</code></pre>
+<blockquote>
+<p><strong>为什么不能用 <code>gamma=[1,1,1,1]</code> 配 <code>y.sum()</code></strong>：$\hat x$ 是减去均值后的结果，任何输入下 $\sum_i\hat x_i$ 恒等于 0。如果 $\gamma$ 全为 1、$\beta$ 全为 0，<code>y.sum()</code> 就是 $\sum_i\hat x_i\equiv0$——这是一个恒为常数 0 的函数，所以<strong>这种设置下 $\partial L/\partial x$ 必然恒为 0</strong>，测试不出 $x$ 的梯度公式对不对；但 $\partial L/\partial\gamma_i=\hat x_i$、$\partial L/\partial\beta_i=1$ 这两个并不会自动变成 0（$\hat x$ 本身不是常数 0，只是求和为 0），所以旧版本的问题准确说是&quot;测不出 $dL/dx$ 公式&quot;，不是&quot;所有梯度都测不出&quot;。换成随机 $\gamma$、随机下游权重 $w$，并且直接实现闭式公式做 <code>allclose</code> 比较之后，三个梯度公式才都得到了真正校验，而不只是打印一个数字给人工比对。</p>
+</blockquote>
+<p><strong>跨 query token 累加校验</strong>（对应本文 (b)(e)）：用&quot;联合 backward&quot;和&quot;逐个 query token 拆开求梯度再手动累加&quot;两种算法对照，这是能真正验证求和关系本身、而不只是&quot;看到一个数字&quot;的做法：</p>
+<pre><code class="language-python">import torch
+
+seq_len, d = 3, 2
+Q = torch.tensor([[1.,0.],[0.,1.],[1.,1.]], requires_grad=True)
+K = torch.tensor([[1.,0.],[0.,1.],[1.,1.]], requires_grad=True)
+V = K.clone().detach().requires_grad_(True)
+
+def attn_out():
+    scores = Q @ K.T / d ** 0.5
+    mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
+    scores = scores.masked_fill(mask, float('-inf'))
+    alpha = torch.softmax(scores, dim=-1)
+    return alpha @ V   # [seq_len, d]，第 0 维是 query token
+
+# 联合 backward
+out = attn_out()
+out[:, 0].sum().backward()   # 对应 dL/do_i = [1,0]
+dK_joint = K.grad.clone()
+
+# 逐 query token 拆开求梯度，再手动累加
+K.grad = None
+out2 = attn_out()
+dK_per_t = torch.zeros_like(K)
+for t in range(seq_len):
+    dK_t, = torch.autograd.grad(out2[t, 0], K, retain_graph=True)
+    dK_per_t += dK_t
+
+print(&quot;联合 backward:&quot;, dK_joint)
+print(&quot;逐 t 累加     :&quot;, dK_per_t)
+print(&quot;是否一致:&quot;, torch.allclose(dK_joint, dK_per_t))   # 应为 True
+
+# query 1 的边界情况：ds_11 恒为 0
+print(&quot;dQ[0]（应为 [0,0]）:&quot;, torch.autograd.grad(out2[:, 0].sum(), Q, retain_graph=True)[0][0])
+</code></pre>
+<hr />
+<h3>6.8 反向传播 FLOPs：&quot;×2&quot;这句话背后的原理</h3>
+<p>前向文档&quot;四、乘上 Batch Size&quot;一节提到&quot;加上反向传播（约为前向的 2 倍）&quot;。&quot;反向约为前向 2 倍&quot;这句话背后的逻辑，和&quot;系数 6&quot;的经验估算是同一套：</p>
+<p>$$\text{训练 FLOPs}\approx 6NT = \underbrace{2NT}_{\text{前向}}+\underbrace{2NT}_{\text{反向：对权重的梯度}}+\underbrace{2NT}_{\text{反向：对输入的梯度}}$$</p>
+<p>前向占 $2NT$（&quot;1 份&quot;），反向的两项加起来占 $4NT$（&quot;2 份&quot;）——这就是&quot;×2&quot;的来源。这里的 $N$ 是<strong>全模型</strong>参数量；如果只看某一个矩阵（比如 $W_Q$，参数量记为 $N_{W_Q}$，避免和全模型的 $N$ 混用），对应的三次矩阵乘法各自的 FLOPs 是：</p>
+<table>
+<thead>
+<tr>
+  <th>项</th>
+  <th>计算</th>
+  <th>FLOPs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>前向</td>
+  <td>$q_\text{proj}=XW_Q$</td>
+  <td>$2TN_{W_Q}$</td>
+</tr>
+<tr>
+  <td>反向·对权重</td>
+  <td>$\dfrac{\partial L}{\partial W_Q}=X^\top\dfrac{\partial L}{\partial q_\text{proj}}$</td>
+  <td>$2TN_{W_Q}$</td>
+</tr>
+<tr>
+  <td>反向·对输入</td>
+  <td>$\dfrac{\partial L}{\partial X}=\dfrac{\partial L}{\partial q_\text{proj}}W_Q^\top$</td>
+  <td>$2TN_{W_Q}$</td>
+</tr>
+</tbody>
+</table>
+<p>单看 $W_Q$ 这一个矩阵，三项合计是 $6TN_{W_Q}$——<strong>&quot;×2&quot;这个原理本身没问题</strong>。把这套逻辑对 $W_Q,W_K,W_V,W_O,W_1,W_2$ 等所有参数矩阵各自算一遍再加总，<strong>还需要单独加上共享的 Embedding/Unembedding 矩阵 $E$</strong>——$E$ 虽然在输入端只是按 token id 查表（几乎不产生 FLOPs），但在输出端的 Unembedding 步骤（$\text{logits}=h_\text{final}E^\top$）里，它确确实实参与了一次和 $W_Q$ 等同量级的大规模稠密矩阵乘法，同样要按 $6TN_E$ 计入。把 $W_Q,\dots,W_1,W_2$ 这些矩阵和 $E$ 加总，$\sum N_{W_\cdot}+N_E\approx N$（全模型参数量；是约等于不是恒等——$N$ 还包含 LayerNorm 的 $\gamma,\beta$、各线性层 bias、Position Embedding 这些<strong>不</strong>经过大矩阵乘法的参数，它们相对 175B 小到可以忽略；但 $E$ 不属于这一类可忽略项，只是它本身占全模型参数量的比例也不大——约 6.18 亿，占 175B 的 0.35%左右——量级上同样可以忽略，但道理和&quot;不参与大矩阵乘法&quot;不一样，是&quot;参与了但占比小&quot;），才回到开头那个全模型的 $6NT$：$N$ 在&quot;单个矩阵的 $6TN_{W_Q}$&quot;和&quot;全模型的 $6NT$&quot;这两处指的不是同一个数字，只是背后的原理相同，容易在核对数字时混淆，这里特意拆开说明一下。</p>
+<p>直接用参数量算前向 FLOPs（$2NT$，$N=175\times10^9$，$T=3.2\times10^6$ token/step——<strong>这里需要说明</strong>：$3.2\text{M}$ token/step 是 GPT-3 论文里<strong>完整 batch size 阶段</strong>的口径；论文提到训练早期会把 batch size 从较小规模逐渐爬升到完整值，所以并非所有训练 step 都固定是这个 token 数，这里用的是达到完整 batch 之后的稳态值，不影响下面 $6NT$ 这套框架本身）：</p>
+<p>$$2NT = 2\times175\times10^9\times3.2\times10^6\approx1.12\times10^{18}$$</p>
+<p><strong>更新</strong>：本文早期版本在这里核对时发现，前向文档当时的&quot;一层 Block 共 6 次大矩阵乘法&quot;算法把 $W_1,W_2$（形状 $[12288,49152]$ 和 $[49152,12288]$，比 $W_Q$ 大 <strong>4 倍</strong>）当成和 $W_Q,W_K,W_V,W_O$ 同样大小来计算，导致前向 FLOPs 少算了约 2 倍；一层的等价规模应该是：</p>
+<p>$$\underbrace{4}_{W_Q,W_K,W_V,W_O（各 1 倍）} + \underbrace{2\times4}_{W_1,W_2（各 4 倍）} = 12 \text{ 个 } W_Q\text{ 等价规模，而不是 6 个}$$</p>
+<p><strong>这一处已经在前向文档中修正</strong>（目前前向文档给出的前向 FLOPs 约 $1.14\times10^{18}$、完整训练 step 约 $3.4\times10^{18}$，和这里 $2NT\approx1.12\times10^{18}$、$6NT\approx3.36\times10^{18}$ 的结果一致），本文这里保留这段推导过程，是为了说清楚&quot;×2&quot;背后 $6NT=2NT+2NT+2NT$ 这套逻辑是怎么来的，不再是&quot;待核对的分歧&quot;。</p>
+<p>&quot;$6NT\approx2NT_\text{前向}+4NT_\text{反向}$&quot;这个近似框架本身是成立的；它同样忽略了 attention 的 $S^2$ 项、softmax/LayerNorm/GELU 等非矩阵乘法开销、Embedding 查表、优化器更新和梯度检查点重算，不是精确恒等式。</p>
+<hr />
+<h3>6.9 一次完整训练 step 的伪代码</h3>
+<p><strong>这里需要说明适用范围</strong>：下面是一段现代自回归语言模型训练的通用伪代码，用来展示&quot;loss.backward() 背后对应哪些反向步骤&quot;，不是 GPT-3 论文披露的原始训练实现细节。GPT-3 论文描述的做法是把多篇文档打包（packing）成完整的 2048-token 序列，而不是以 padding + <code>ignore_index</code> 为核心机制来处理变长样本；<code>ignore_index=pad_id</code> 这一行是通用做法的示意，不代表 GPT-3 实际训练就是这样处理边界的。</p>
+<pre><code class="language-python">for batch in dataloader:
+    tokens, targets = batch                      # tokens: [B, S]
+
+    logits = model(tokens)                        # [B, S, 50257]
+    # 注意：PyTorch 的 cross_entropy 把第 1 维当类别维，不能直接传 [B,S,V] 配 [B,S]，必须先展平：
+    loss = cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1), ignore_index=pad_id)
+
+    loss.backward()
+    # 从后往前：dL/dlogits → Unembedding 反向 → Final LayerNorm 反向
+    #   → 第96层 Block 反向 → ... → 第1层 Block 反向 → Embedding+PosEmb 反向
+
+    optimizer.step()
+    optimizer.zero_grad()
+</code></pre>
+<hr />
+<h3>6.10 训练显存 vs 推理缓存</h3>
+<p>前向文档没有涉及 KV Cache，这里按 GPT-3 的参数自己估算一下（标准 MHA，96 head、每头 128 维、96 层，FP16）：</p>
+<p>$$\text{每 token 每层：}\ 2\times96\times128\times2\text{ 字节}=49{,}152\text{ 字节}=48\text{ KiB}\ (1\text{KiB}=1024\text{ 字节})$$</p>
+<p>$$96\text{ 层：}\ 96\times48\text{ KiB}=4{,}608\text{ KiB}=4.5\text{ MiB/token}$$</p>
+<p>如果上下文长度按 2048 算（GPT-3 常见上下文长度）：$2048\times4.5\text{ MiB}=9{,}216\text{ MiB}=\textbf{9 GiB}$（二进制口径，恰好整除）；换算成十进制的 GB（$1\text{GB}=10^9$ 字节）约为 <strong>9.66 GB</strong>（batch=1，FP16）。GPT-3 没有 GQA，K/V head 数等于 Q head 数，所以这个数字比 LLaMA-3 同规模模型的 KV Cache 大得多；另外这是<strong>假设全部 96 层都用完整稠密因果注意力</strong>算出的上界——如果按 GPT-3 论文实际的稠密/稀疏交替架构，稀疏层的 KV Cache 未必需要保留全部历史位置，实际占用可能更低。</p>
+<p>推理和训练要保存的是两套不同的内存结构：</p>
+<ul>
+<li><strong>推理</strong>：参数 + 当前步临时激活 + 跨生成步骤保留的 KV Cache（上面估算的量）。</li>
+<li><strong>训练</strong>：参数 + 梯度 + 优化器状态 + 为反向传播保存或重算的激活（LayerNorm 的 $\hat x$、softmax 的 $\alpha$、GELU 的中间值等）。混合精度 + AdamW 大约每参数 12～18 字节（取决于是否保留 FP32 master weight、梯度精度等具体配置），是纯 FP16/BF16 权重的 6～9 倍，不含激活；具体倍数没有统一标准，取决于训练栈的实现。</li>
+</ul>
+<hr />
+<h3>6.11 小结</h3>
+<blockquote>
+<p>GPT-3 的反向传播 = 交叉熵梯度 $p-y$ 从 logits 出发，经过 Unembedding、Final LayerNorm、96 层 Block（每层：残差直通 + GELU FFN 反向（单路径，无需分支相加）+ LayerNorm 反向（作为记忆类比可以说&quot;比 RMSNorm 多一项'减均值'耦合&quot;，但严格说两者用的标准化统计量本身不同，不是从 LayerNorm 公式里删掉一项就精确等于 RMSNorm，第四节有展开）+ 多头注意力反向（O 投影 → concat 拆分 → 对 V 加权求和反向【跨 query token 累加】→ softmax 反向【第一个 token 的边界情况：单元素 softmax 导数恒为 0】→ 对 Q、K 的梯度【K 同样跨 query token 累加，无需 GQA 也一样】→ Q/K/V 投影反向）+ 残差直通 + LayerNorm 反向），最终把梯度分别加回 Token Embedding 和 Position Embedding 两张表。核心仍是链式法则 + &quot;分支相加&quot;这条规则；GPT-3 没有 GQA、RoPE、SwiGLU 这些 LLaMA-3 特有的复杂度，&quot;跨 query token 的梯度累加&quot;这一条在稠密因果注意力、以及 GPT-3 实际使用的局部带状稀疏层里都会发生，和用不用 GQA 无关；但严格来说这不是&quot;因果&quot;这个词本身逻辑上保证的，而是取决于 attention mask 具体让哪些位置重叠（第五节 5.4 的范围说明有展开）。前向文档里&quot;反向约为前向 2 倍&quot;这句话，来源正是 $6NT\approx2NT_\text{前向}+4NT_\text{反向}$ 这套近似估算。</p>
+</blockquote>
+<h2 id="sec7">七、总结</h2>
+<blockquote>
+<p><strong>GPT-3 拥有约 1750 亿参数（忽略若干小项、并假设 Embedding/Unembedding 权重共享后的近似核对），按完整 3.2M-token batch 折算，一个&quot;完整 batch 等效 step&quot;约需 $3.4 \times 10^{18}$ 次浮点运算（主导项近似，含线性层与注意力的 $S^2$ 项，前向+反向；训练早期 batch 从 32K 逐步爬升到 3.2M 时，实际 step 的 FLOPs 会明显更小），仅一份 $[T,d]$ 形状的激活张量（$T$ 取完整 global batch 的 320 万 token，是聚合/等价规模，不是单张 GPU 上实际同时保存的一整块张量）就需要 78.6GB 显存（一层完整的激活远不止这一份）——这是为什么它需要大规模 GPU 集群、数周到一个多月才能训练完成的根本原因（本文按 1024 张 V100 推算约 29 天，Patterson 论文按约 10,000 张 V100 估算约 15 天，两者都是估算配置，不是 OpenAI 公开的确切训练规模）。FLOPs 和电能之间的桥梁是硬件能效（FLOP/s per Watt）。按 V100 的官方峰值 125 TFLOP/s、300W 芯片 TDP 计算，得到一个理想化设备侧估算约 213 MWh（这不是严格数学下限——峰值算力和 TDP 都是规格表数字，不保证在同一工作点同时成立）；Patterson 等人论文给出的估算值是 1,287 MWh，约为这个估算的 6 倍——这个差距可以拆解成三项来解释：达成/峰值吞吐比（24.6 vs 125 TFLOP/s，约 5.08 倍，背后是显存带宽、通信、重算等因素共同造成、无法精确拆分占比）、功率统计边界不同（300W 芯片 TDP vs 论文 330W 系统平均功率，约 1.10 倍）、以及 PUE（约 1.10 倍）——三者相乘约 6.15 倍，和观察到的&quot;约 6 倍&quot;吻合，但其中 24.6 TFLOP/s（第一项的达成吞吐）和 330W（第二项的系统功率）都是 Patterson 论文针对同一个 GPT-3 训练配置给出的数字，不是可以脱离具体工作负载、各自独立存在的常数。1,287 MWh 本身是论文反推出的估算值，不是电表实测读数。推理虽然单次用电少，但只有在大规模、长期部署时，累计推理能耗才可能超过一次训练用电量，不是所有模型都必然如此。</strong></p>
+</blockquote>
+
 </div>
 </body>
 </html>
