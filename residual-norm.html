@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从残差连接的命名说起，推导为什么不存在雅可比接近单位阵的归一化算子">
+<title>为什么造不出一种"稳定的 Norm"</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {
+    delimiters: [
+      {left: '$$', right: '$$', display: true},
+      {left: '$', right: '$', display: false}
+    ],
+    throwOnError: false
+  });"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e2e4ed;
+    --muted: #8b8fa8;
+    --accent: #5b8af0;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --code-bg: #12151f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', 'Noto Serif SC', serif;
+    font-size: 16px;
+    line-height: 1.8;
+    padding: 2rem 1rem;
+  }
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  .back-link {
+    display: inline-block;
+    margin-bottom: 1.4rem;
+    color: var(--muted);
+    text-decoration: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.9rem;
+  }
+  .back-link:hover { color: var(--accent); }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.4rem;
+    line-height: 1.3;
+  }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 2.4rem 0 0.8rem;
+    padding-left: 0.8rem;
+    border-left: 3px solid var(--accent);
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 1.8rem 0 0.6rem;
+  }
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--yellow);
+    margin: 1.4rem 0 0.4rem;
+  }
+  p {
+    margin: 0.7rem 0;
+  }
+  blockquote {
+    border-left: 3px solid var(--green);
+    background: #0d1f17;
+    color: var(--green);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 6px 6px 0;
+    font-style: normal;
+  }
+  blockquote p { margin: 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  th {
+    background: var(--surface);
+    color: var(--accent);
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 600;
+  }
+  td {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  tr:nth-child(even) td { background: #13161f; }
+  code {
+    background: var(--code-bg);
+    color: #7dd3fc;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin: 1.1rem 0;
+  }
+  pre code {
+    background: none;
+    color: #94a3b8;
+    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+  ul, ol {
+    padding-left: 1.6rem;
+    margin: 0.6rem 0;
+  }
+  li { margin: 0.3rem 0; }
+  strong { color: #fff; }
+  .katex-display {
+    overflow-x: auto;
+    padding: 0.4rem 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+    font-style: italic;
+  }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.4rem;
+    margin: 1.5rem 0 2rem;
+    font-size: 0.93rem;
+  }
+  .toc-title {
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .toc a {
+    color: var(--muted);
+    text-decoration: none;
+    display: block;
+    padding: 0.15rem 0;
+  }
+  .toc a:hover { color: var(--text); }
+</style>
+<style>
+  figure { margin: 1.6rem 0; }
+  figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+  }
+  figcaption {
+    margin-top: 0.55rem;
+    color: var(--muted);
+    font-size: 0.87rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: center;
+  }
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--yellow);
+    border-radius: 0 8px 8px 0;
+    padding: 0.9rem 1.3rem;
+    margin: 1.4rem 0;
+  }
+  .callout strong { color: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="container">
+<nav aria-label="站点导航"><a class="back-link" href="index.html">← 返回文章首页</a></nav>
+
+<h1>为什么造不出一种"稳定的 Norm"</h1>
+<p class="subtitle">从"残差连接"这个名字说起，到一个三行推导封死的死路</p>
+
+<blockquote>
+<p>本文只回答一条链上的问题：那根旁路为什么叫"残差连接"？Pre/Post-Norm 的"前后"到底指谁？前向值明明都贴着 $x$，凭什么一个稳一个不稳？既然 Norm 的雅可比是祸根，能不能设计一种雅可比更好的 Norm？<br>
+最后一问的答案是<strong>不能</strong>，而且原因很干脆。全文会出现两次同一个教训：<strong>看表象会看错，得看真正干活的那个量。</strong></p>
+</blockquote>
+
+<div class="toc">
+<div class="toc-title">目录</div>
+<a href="#s1">一、那根线到底叫什么</a>
+<a href="#s2">二、Pre/Post-Norm 是另一根轴</a>
+<a href="#s3">三、前向都 ≈ x，凭什么一个稳一个不稳</a>
+<a href="#s4">四、能不能设计一种稳定的 Norm</a>
+<a href="#s5">五、所以 Post-Norm 并不是"坏"</a>
+<a href="#s6">收口：两次同样的教训</a>
+</div>
+
+<hr />
+
+<h2 id="s1">一、那根线到底叫什么</h2>
+
+<p>先说一个几乎所有人都卡过的地方。残差块写成</p>
+
+$$y = x + F(x)$$
+
+<p>那根绕过 $F$ 的旁路上，流的是 <strong>$x$</strong>；真正的"残差"（差值）是 $F(x) = y - x$，它在<em>支路</em>上。既然线里走的是 $x$ 不是残差，为什么这根线叫<strong>残差连接</strong>？</p>
+
+<div class="callout">
+<p><strong>答案：</strong>"残差连接"是按它实现的<em>思想</em>命名的，不是按<em>线里流的是什么</em>命名的。</p>
+</div>
+
+<h3>ResNet 的原始动机</h3>
+
+<p>设某个模块<strong>理想中应该算出的输出</strong>是 $H(x)$——$H$ 就是"目标映射"，$x$ 是输入。</p>
+
+<p>普通做法：堆几层网络，硬让它们把 $x$ 变成 $H(x)$。</p>
+
+<p>ResNet 换了个写法。任何 $H(x)$ 都可以恒等地拆成两部分：</p>
+
+$$H(x) = x + F(x), \qquad F(x) = H(x) - x$$
+
+<p>然后<strong>让网络里的层去学 $F(x)$，而不是直接学 $H(x)$</strong>。最后把 $x$ 加回来，输出 $x + F(x)$ 正好等于 $H(x)$，结果完全一样。但层要学的东西变了：不再是"从头算出整个 $H(x)$"，而是只算"$H(x)$ 相对 $x$ 需要补的那点改动量"——这个差，就叫<strong>残差（residual）</strong>。</p>
+
+<p>为什么这样更好学，两个原因：</p>
+
+<ul>
+<li>深网络里每一层通常只想对输入做<em>小幅微调</em>，理想输出 $H(x)$ 本来就跟输入 $x$ 很接近。于是 $F(x) = H(x) - x$ 很小、接近 $0$。让一堆非线性层输出"接近 0 的小修正"很容易；反过来，让它们精确地"把 $x$ 原样复制出来"其实很难——得让所有权重恰好凑出恒等映射。</li>
+<li>有了那条 $+x$ 旁路，哪怕 $F$ 什么都没学会（$F \approx 0$），模块至少能把 $x$ 原样传下去：信息不丢，梯度也能顺着这条路直达。</li>
+</ul>
+
+<p>打个比方。你要把一张照片 $x$ 修成目标效果 $H(x)$：</p>
+
+<ul>
+<li><strong>直接学 $H$</strong>：让模型对着空白、从头重画整张照片。</li>
+<li><strong>残差学法</strong>：让模型只算出"要在原图上叠哪些调整 $F(x)$"（调亮一点、加点对比度），然后 <em>最终 = 原图 + 调整</em>。原图直接保留，模型只需学那个改动量。</li>
+</ul>
+
+<p>所以那条 $+x$ 旁路之所以叫"残差连接"，正是因为<strong>它让"只学改动量 $F$"这套玩法成立</strong>。名字指向的是机制，不是说"这根线上流着残差"。</p>
+
+<h3>同一根线，两套命名视角</h3>
+
+<p>值得一提：同一根旁路还有两个同义名——<strong>skip connection（跳接）</strong>、<strong>shortcut（捷径）</strong>。这两个恰恰是按"线里走 $x$、抄了条近路"来命名的。</p>
+
+<table>
+<thead>
+<tr><th>名字</th><th>命名依据</th><th>它在说什么</th></tr>
+</thead>
+<tbody>
+<tr><td>残差连接 (residual connection)</td><td>按<strong>思想</strong></td><td>它让"只学残差 $F$"这套方法成立</td></tr>
+<tr><td>跳接 / 捷径 (skip / shortcut)</td><td>按<strong>结构</strong></td><td>线里走的是 $x$，抄了条近路</td></tr>
+</tbody>
+</table>
+
+<p><strong>同一根旁路、两套命名视角，两个都对。</strong>如果你的直觉是"线里明明流的是 $x$"，那你的直觉对应的正是 skip/shortcut 这一组名字。</p>
+
+<blockquote>
+<p><strong>名字指向机制，不指向表象。</strong>记住这句——第三节还要用一次，形式换了，陷阱是同一个。</p>
+</blockquote>
+
+<hr />
+
+<h2 id="s2">二、Pre/Post-Norm 是另一根轴</h2>
+
+<p>命名那件事澄清之后，紧接着容易出第二个混淆：常见说法里"<em>Norm 放在残差连接之后 / 之前</em>"，这个"前后"指的到底是谁的前后？</p>
+
+<p>它跟上一节的命名<strong>毫无关系</strong>。它问的是：LayerNorm 放在那个 $\oplus$（相加这一步）的哪一侧。</p>
+
+<table>
+<thead>
+<tr><th>写法</th><th>公式</th><th>Norm 的位置</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Post-Norm</strong></td><td>$y = \mathrm{LN}(x + F(x))$</td><td>在相加<strong>之后</strong>，压在主干上</td></tr>
+<tr><td><strong>Pre-Norm</strong></td><td>$y = x + F(\mathrm{LN}(x))$</td><td>在相加（以及 $F$）<strong>之前</strong>，长在支路上</td></tr>
+</tbody>
+</table>
+
+<p>所以"残差连接之后/之前" $=$ "$\oplus$ 相加这一步的后/前"。<strong>"残差连接"这名字怎么来的（思想）</strong>和<strong>"前/后"指谁（Norm 相对 $\oplus$ 的位置）</strong>本来是两件事，被揉进同一句话里，才显得绕。</p>
+
+<figure>
+  <img src="pre_norm_vs_post_norm_structure.png" alt="Pre-Norm 与 Post-Norm 的结构对比图，青色线为残差主干">
+  <figcaption>看青色那条线：Pre-Norm 里那条 $x$ 旁路是"裸 $x$"，上面什么都不挂；Post-Norm 里每一层的 $\oplus$ 之上都压着一个 LN。</figcaption>
+</figure>
+
+<p>梯度从 $y$ 回到 $x$ 时，Pre-Norm 一路无阻；而 Post-Norm 每往回穿一层就得过一道 LN，深栈一叠起来就容易失稳。这就是"梯度高速公路"这个说法的来源。</p>
+
+<h3>顺带：LN 是什么</h3>
+
+<p><strong>LN = LayerNorm，层归一化。</strong>它拿到一个向量（比如某个 token 的隐藏表示，维度 $d$），先算这 $d$ 个分量的均值和方差，减均值、除标准差，归一化成"均值 0、方差 1"；再乘一个可学习的缩放 $\gamma$、加一个可学习的偏移 $\beta$。目的是把每一步的激活幅度压在稳定区间里，不让它在深层里越滚越大或越缩越小。</p>
+
+<p>叫"Layer"是因为它在<strong>单个 token 的特征维度内部</strong>做归一化（对比 BatchNorm 是跨一个 batch 的样本做）。</p>
+
+<hr />
+
+<h2 id="s3">三、前向都 ≈ x，凭什么一个稳一个不稳</h2>
+
+<p>这里是全文最容易翻车的地方，也是第一节那句话第二次兑现的地方。</p>
+
+<p>一个非常自然的疑问：<em>不论 Post 还是 Pre，$x$ 都是直通、$F(x)$ 都是小量，所以输出看上去都在 $x$ 附近。既然前向都差不多，凭什么一个稳一个不稳？</em></p>
+
+<div class="callout">
+<p><strong>脱节就在这里：</strong>稳定性不是前向的性质，是反向（梯度）的性质；它由<strong>导数</strong>决定，不由<strong>函数值</strong>决定。而"函数值贴近 $x$"根本不蕴含"导数贴近 $I$"。</p>
+</div>
+
+<h3>把两个层面分开</h3>
+
+<p><strong>前向（值）：</strong>两个确实都 $\approx x$，这一层的直觉没错。$F$ 小 $\Rightarrow$ Pre 的 $y = x + F(\cdot) \approx x$；Post 的 $y = \mathrm{LN}(x + F) \approx \mathrm{LN}(x) \approx x$（假设 $x$ 已大致归一化）。</p>
+
+<p><strong>反向（导数）：</strong>决定稳定性的是 $\partial y / \partial x$，而这两个<strong>截然不同</strong>：</p>
+
+$$\text{Pre:}\quad \frac{\partial y}{\partial x} = I + J_F \cdot J_{\mathrm{LN}} \;\approx\; I$$
+
+$$\text{Post:}\quad \frac{\partial y}{\partial x} = J_{\mathrm{LN}} \cdot (I + J_F) \;\approx\; J_{\mathrm{LN}}$$
+
+<p>看出来了：<strong>"$F$ 是小量"这同一个条件，在 Pre 里让导数 $\approx I$（干净），在 Post 里让导数 $\approx J_{\mathrm{LN}}$（不是 $I$）。</strong>前向都 $\approx x$，导数却一个 $\approx I$、一个 $\approx J_{\mathrm{LN}}$。差别全在这。</p>
+
+<h3>为什么值接近 $x$、导数却离 $I$ 很远</h3>
+
+<p>因为"值"和"斜率"是两回事。举一个能手算的例子——RMSNorm：</p>
+
+$$g(x) = \frac{x}{\mathrm{RMS}(x)}, \qquad \mathrm{RMS}(x) = \frac{\lVert x \rVert}{\sqrt{d}}$$
+
+<p>在任何满足 $\mathrm{RMS}(x) = 1$ 的点上，$g(x) = x$，<strong>值完全相等</strong>。但它的雅可比是</p>
+
+$$J_g = \frac{1}{\mathrm{RMS}(x)}\left(I - \hat{x}\hat{x}^{\top}\right), \qquad \hat{x} = \frac{x}{\lVert x \rVert}$$
+
+<p>沿 $\hat{x}$（径向 / 模长）方向，$J_g \hat{x} = 0$——<strong>斜率是 0</strong>。你把 $x$ 沿它自己的方向拉长一点，$g$ 几乎不变，因为它会重新把模长归一化掉。</p>
+
+<p><strong>值落在 $x$ 上，斜率却是 0。</strong>这就是"值近 $x$ $\neq$ 斜率近 $1$"的铁证。</p>
+
+<figure>
+  <img src="value_near_x_vs_slope_near_one.png" alt="函数值贴着 x 但斜率远离 1 的示意图">
+  <figcaption>值贴着 $x$、斜率却在乱跑：终点海拔几乎没变，不代表沿途每一步的坡度都是 1。</figcaption>
+</figure>
+
+<h3>为什么"值近 $x$"救不了反向</h3>
+
+<p>因为反向传播是把<strong>每层的导数（斜率）连乘</strong>，不是把函数值连乘。</p>
+
+<ul>
+<li><strong>Pre 主干</strong>：每层导数 $\approx I$，$\prod (\approx I) \approx I$——连乘多少层都是 1，梯度原样回到底层。<strong>那个 $I$ 来自裸 $x$</strong>（没被 LN 碰过），所以是干净的。</li>
+<li><strong>Post 主干</strong>：每层导数 $\approx J_{\mathrm{LN}}$，其特征值形如 $\{1/\sigma, \dots, 0, 0\}$——有的方向是 0、有的是 $1/\sigma \neq 1$。连乘 $\prod J_{\mathrm{LN}}$ 之后：被抹的方向乘成 0（梯度消失），存活方向按 $\prod_l (1/\sigma_l)$ 漂移（爆炸或衰减）。<strong>Post 没有那个裸 $I$</strong>，因为 LN 把整条主干连同 $x$ 自己的梯度都包了进去，$x$ 的梯度贡献是 $J_{\mathrm{LN}} \cdot I = J_{\mathrm{LN}}$，一出生就被污染。</li>
+</ul>
+
+<blockquote>
+<p>前向"值近 $x$" $=$ 走完一圈回到几乎同样的海拔；<br>
+反向稳定性 $=$ 沿途每一步的坡度。<br>
+你完全可以"终点海拔几乎没变"，但一路坡度忽陡忽缓——把这些坡度连乘起来（深栈几十层），照样翻车。</p>
+</blockquote>
+
+<h3>一个可观察的症状</h3>
+
+<p>原版 Transformer <strong>必须做学习率 warmup</strong>——开头几千步把学习率从 0 慢慢爬上去。原因正是 Post-Norm 在初始化时靠近输出那几层的梯度特别大，一上来就用大学习率会直接发散。</p>
+
+<p>Pre-Norm 的梯度幅度对深度基本不敏感，所以可以不 warmup、能上大学习率、能随便堆层。这就是 GPT-2/3、LLaMA 一律用 Pre-Norm 的工程理由。</p>
+
+<hr />
+
+<h2 id="s4">四、能不能设计一种稳定的 Norm</h2>
+
+<p>既然祸根是 $J_{\mathrm{norm}}$，一个很自然的想法是：换一种 Norm，让它的雅可比本身就接近 $I$，不就行了？</p>
+
+<h3>先排除一个可能：这不是 LayerNorm 一家的毛病</h3>
+
+<p>LayerNorm 和 RMSNorm 的雅可比（略去 $\gamma$）：</p>
+
+<table>
+<thead>
+<tr><th>算子</th><th>雅可比</th><th>零空间</th><th>秩</th></tr>
+</thead>
+<tbody>
+<tr><td>LayerNorm</td><td>$\frac{1}{\sigma}\left(I - \frac{1}{d}\mathbf{1}\mathbf{1}^{\top} - \hat{x}\hat{x}^{\top}\right)$</td><td>抹掉 2 个方向（均值方向 + 径向）</td><td>$d-2$</td></tr>
+<tr><td>RMSNorm</td><td>$\frac{1}{\mathrm{RMS}}\left(I - \hat{x}\hat{x}^{\top}\right)$</td><td>抹掉 1 个方向（径向）</td><td>$d-1$</td></tr>
+</tbody>
+</table>
+
+<p>两者坏在同一处：那个 $1/\sigma$（或 $1/\mathrm{RMS}$）缩放因子逐层连乘 $\prod_l (1/\sigma_l)$ 会漂移——<strong>这才是主因</strong>；再叠上被抹方向的梯度归零。</p>
+
+<p>RMSNorm 只抹 1 维、比 LayerNorm"干净一点"，但那点差别是几千维里少抹一维，<strong>微不足道</strong>；$1/\mathrm{RMS}$ 的漂移它一分不少。所以 <strong>RMSNorm 救不了 Post-Norm</strong>。实践里也没人用 RMSNorm 去修 Post——LLaMA 用 RMSNorm，是把它放在 <strong>Pre</strong> 位置。稳的是位置，不是 Norm 的种类。</p>
+
+<h3>然后是死路：$J \approx I$ 的 Norm 在数学上不存在</h3>
+
+<p>任何"做归一化"的算子，本质是<strong>抹掉尺度信息</strong>，即对缩放不变：</p>
+
+$$\mathrm{norm}(c \cdot x) = \mathrm{norm}(x) \qquad \forall\, c > 0$$
+
+<p>把两边对 $c$ 求导，在 $c = 1$ 处取值：</p>
+
+<ul>
+<li>左边：$\dfrac{d}{dc}\,\mathrm{norm}(cx)\Big|_{c=1} = J_{\mathrm{norm}} \cdot x$</li>
+<li>右边：$\dfrac{d}{dc}\,\mathrm{norm}(x) = 0$（右边根本不含 $c$）</li>
+</ul>
+
+<p>于是：</p>
+
+$$\boxed{\,J_{\mathrm{norm}} \cdot \hat{x} = 0\,}$$
+
+<div class="callout">
+<p><strong>只要它真的归一化（对尺度不变），它的雅可比就必然把 $\hat{x}$ 这个方向打成 0。</strong>这个零空间是被"归一化"这件事本身逼出来的，不是设计失误。再加上为抵消输入尺度，正交方向上必带 $1/\sigma \neq 1$ 的缩放。</p>
+<p>所以：<strong>一个 $J \approx I$ 的"Norm"，就是一个什么都不归一化的 Norm</strong>——自相矛盾。</p>
+</div>
+
+<p>想靠换 Norm 把主干那道雅可比变干净，<strong>此路不通</strong>。</p>
+
+<hr />
+
+<h2 id="s5">五、所以 Post-Norm 并不是"坏"</h2>
+
+<p>"让深层网络稳定"这个真实目标是能达成的，只是不从 Norm 的雅可比下手，而是改别的地方。三条路：</p>
+
+<h3>路线 A：把 Norm 挪下主干</h3>
+
+<p>这就是 <strong>Pre-Norm</strong>。绕一圈回来，它正是"让主干雅可比稳"的最直接解：主干留一个裸的 $I$，把 Norm 的脏雅可比关进支路。</p>
+
+<h3>路线 B：保持 Post，但放大残差、缩小支路</h3>
+
+<p>让 $I$ 在 $J_{\mathrm{norm}}(I + J_F)$ 里重新占主导：</p>
+
+<ul>
+<li><strong>DeepNorm</strong>（微软 DeepNet）：$y = \mathrm{LN}(\alpha \cdot x + F)$，用 $\alpha > 1$ 把残差顶上去，使 LN 内部由 $x$ 主导、每层雅可比贴近一个缩放过的 $I$ ——稳到 <strong>1000 层</strong>。</li>
+<li><strong>ReZero</strong>：$y = x + \alpha \cdot F(x)$，$\alpha$ 是可学标量、<strong>初始化为 0</strong> ——开局每层精确是恒等映射（完美 dynamical isometry），再慢慢放开。</li>
+<li><strong>Admin / Fixup</strong>：同思路，靠初始化把残差分支缩一个 $1/\sqrt{N}$ 量级的因子。</li>
+</ul>
+
+<h3>路线 C：干脆不要 Norm</h3>
+
+<p><strong>Fixup</strong>、<strong>NFNet</strong>（normalizer-free）证明深网络可以完全无 Norm 训练，把"控尺度"的活交给精心设计的初始化和残差缩放。</p>
+
+<h3>Pre-Norm 自己的代价</h3>
+
+<p>Pre-Norm 不是白拿好处。它那条干净通路的代价在<strong>前向</strong>：每层往 $x$ 上加一个约单位方差的 $F$，残差流方差随深度<strong>线性增长</strong>；越深，新加的 $F$ 相对整条流就越小，深层的边际贡献被稀释（有人称之为"深层失效"或表示坍缩）。</p>
+
+<p>Post-Norm 每层都把流重新归一化，前向幅度被牢牢摁住，正则更强、混合更充分。</p>
+
+<table>
+<thead>
+<tr><th></th><th>反向（梯度）</th><th>前向（幅度）</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Pre-Norm</strong></td><td>✅ 主干留裸 $I$，好训、稳、不挑学习率、随便加深</td><td>❌ 残差流方差随深度线性涨，深层贡献递减</td></tr>
+<tr><td><strong>Post-Norm</strong></td><td>❌ LN 雅可比连乘，难训、要 warmup 或特殊初始化</td><td>✅ 每层重新归一化，幅度受控、正则更强</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<p><strong>关于"Post-Norm 质量更好"的限定：</strong>在若干设定下（如 DeepNet 报告的深层机器翻译任务），把 Post-Norm 训稳之后，其收敛质量可以不逊于甚至略优于 Pre-Norm。<strong>但这依赖任务、深度和初始化方案，不是普遍结论</strong>，也不构成"应该换回 Post-Norm"的建议。当前大模型一边倒选 Pre-Norm，选的是<strong>规模化时的训练鲁棒性</strong>，不是因为它在每个意义上都更优。</p>
+</div>
+
+<h3>统一原理</h3>
+
+<blockquote>
+<p>稳定要的是<strong>每层主干雅可比的奇异值都贴近 1</strong>（dynamical isometry）。<br>
+达成它有两条路——<strong>主干上留一个干净的 $I$</strong>（Pre-Norm），或<strong>把 Norm 的扭曲缩到相对 $I$ 很小</strong>（DeepNorm / ReZero 那类残差缩放）。<br>
+唯独没有"造一个雅可比是 $I$ 的 Norm"这条路，因为那等于造一个不归一化的归一化。</p>
+</blockquote>
+
+<hr />
+
+<h2 id="s6">收口：两次同样的教训</h2>
+
+<p>回头看，这篇里两个卡点其实是<strong>同一个错误的两种形态</strong>：</p>
+
+<table>
+<thead>
+<tr><th>卡点</th><th>表面读法</th><th>真正干活的东西</th></tr>
+</thead>
+<tbody>
+<tr><td>那根线为什么叫"残差连接"</td><td>线里流的是 $x$，不是残差</td><td>名字指向<strong>机制</strong>——它让"只学 $F$"成立</td></tr>
+<tr><td>Pre 与 Post 为什么一稳一不稳</td><td>前向值两边都 $\approx x$</td><td>稳定性看<strong>导数</strong>，不看函数值</td></tr>
+</tbody>
+</table>
+
+<p>第二个之所以难，正因为第一个已经先示范过一次同样的陷阱：<strong>照着表象读会读错，得看真正起作用的是什么。</strong></p>
+
+<p>而第四节那个三行推导，是这条思路的终点——它没有给出一个更好的 Norm，而是<strong>证明了那个方向上没有东西可找</strong>。知道哪条路走不通，和知道哪条路走得通，是同等分量的知识。</p>
+
+<hr />
+
+<footer style="color: var(--muted); font-size: 0.9rem; margin-top: 2.5rem;">
+iEnjoy · GPU &amp; LLM Learning Notes
+</footer>
+
+</div>
+</body>
+</html>
