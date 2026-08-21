@@ -1307,12 +1307,17 @@ W ← W - lr × (梯度的某种处理结果)
 <p>线性层反向的通用公式（记住这两条，后面所有 $W_Q,W_K,W_V,W_O,W_\text{gate},W_\text{up},W_\text{down}$ 的反向都是同一套）：</p>
 <p>$$Y = XW \implies \frac{\partial L}{\partial X} = \frac{\partial L}{\partial Y}\,W^\top, \qquad \frac{\partial L}{\partial W} = X^\top \frac{\partial L}{\partial Y}$$</p>
 <p>这里的 $X$ 既可以是单个 token 的一行 $[1,\ d_\text{in}]$，也可以是整个 batch 展平后的 $[B\times S,\ d_\text{in}]$（对应的 $\partial L/\partial Y$ 则是 $[B\times S,\ d_\text{out}]$）。取展平版本时，$X^\top\dfrac{\partial L}{\partial Y}$ 的<strong>收缩维正好就是 $B\times S$</strong>——也就是说 9.2 记号约定里那个 $\sum_{b,t}$ <strong>并不是额外套上去的一层循环，它就是这次矩阵乘法本身的收缩维</strong>。本节按单 token 写的 $[1,4096]$ 形式只是 $B\times S=1$ 的特例，所以下面权重梯度一律写成 $\partial L_{b,t}/\partial W$；9.8 节 $6NT$ 那张表用的是展平版本，那里的 $\partial L/\partial W=X^\top\partial L/\partial Y$ 已经把 $b,t$ 的求和包含在内了。</p>
-<p>代入 LM Head：</p>
-<p>$$\frac{\partial L}{\partial h_\text{final}} = \frac{\partial L}{\partial \text{logits}} \cdot U^\top \quad [1,\ 128256]\times[128256,\ 4096] \rightarrow [1,\ 4096]$$</p>
-<p>$$\frac{\partial L_{b,t}}{\partial U} = h_\text{final}^\top \cdot \frac{\partial L}{\partial \text{logits}} \quad [4096,\ 1]\times[1,\ 128256] \rightarrow [4096,\ 128256]$$</p>
-<p>两个结果形状分别对应 $h_\text{final}$（继续往前传）和 $U$（这一层要更新的权重）——这个&quot;一个输出、两个梯度&quot;的模式会在每一个矩阵乘法处重复出现。</p>
-<p>上面写成 $\partial L_{b,t}/\partial U$，是<strong>单个 token 位置</strong>的贡献；$U$ 是整个 batch、整个序列所有 token 共享的同一份权重，按前面的记号约定，真正要用来更新权重的梯度是对所有 $b,t$ 求和：</p>
-<p>$$\frac{\partial L}{\partial U} = \sum_{b,t}\frac{\partial L_{b,t}}{\partial U} = \sum_{b,t} h_{b,t}^\top \frac{\partial L}{\partial \text{logits}_{b,t}}$$</p>
+<p>代入 LM Head。<strong>这一小节把 $(b,t)$ 下标全部写出来</strong>，不用 9.2 的省略约定——因为下面两个梯度的性质根本不同，下标忽有忽无正是最容易读错的地方。记 $h_{b,t}$ 为第 $(b,t)$ 个 token 位置的 $h_\text{final}$（$b=1..B$ 标是哪条序列，$t=1..S$ 标该序列内的第几个 token 位置）：</p>
+<p>$$\frac{\partial L}{\partial h_{b,t}} = \frac{\partial L}{\partial \text{logits}_{b,t}} \cdot U^\top \quad [1,\ 128256]\times[128256,\ 4096] \rightarrow [1,\ 4096]$$</p>
+<p>$$\frac{\partial L_{b,t}}{\partial U} = h_{b,t}^\top \cdot \frac{\partial L}{\partial \text{logits}_{b,t}} \quad [4096,\ 1]\times[1,\ 128256] \rightarrow [4096,\ 128256]$$</p>
+<p><strong>为什么上式分子是 $L$、下式却必须是 $L_{b,t}$</strong>——这不是随手写的，两者是不同类的对象：</p>
+<ul>
+<li>上式对<strong>激活</strong> $h_{b,t}$ 求导。每个位置有自己的一份 $h$，而位置 $(b,t)$ 的 $h$ 只参与生成它自己那一份 loss，所以 $\dfrac{\partial L}{\partial h_{b,t}}=\dfrac{\partial L_{b,t}}{\partial h_{b,t}}$，两种写法数值相同，写 $L$ 不会有歧义。</li>
+<li>下式对<strong>权重</strong> $U$ 求导。$U$ 在计算图里只有一份，被全部 $B\times S$ 个位置共用，因此 $\dfrac{\partial L}{\partial U}$ 在数学上唯一地指<strong>求和之后</strong>那个量。单个位置的那一份不是 $L$ 对 $U$ 的导数，只是求和式里的一项，只能写成 $\dfrac{\partial L_{b,t}}{\partial U}$。若这里也写 $\partial L/\partial U$，和下面的求和式并排就得到 $\partial L/\partial U=\sum_{b,t}\partial L/\partial U$——只有 $B\times S=1$ 时成立。两者形状都是 $[4096,128256]$，维度检查发现不了，只能靠记号区分。</li>
+</ul>
+<p>两个结果形状分别对应 $h_{b,t}$（继续往前传）和 $U$（这一层要更新的权重）——这个&quot;一个输出、两个梯度&quot;的模式会在每一个矩阵乘法处重复出现，而且每次都是&quot;激活梯度写 $L$、权重梯度写 $L_{b,t}$&quot;这同一对搭配。</p>
+<p>真正用来更新 $U$ 的梯度，是把所有 token 位置的贡献加起来：</p>
+<p>$$\frac{\partial L}{\partial U} = \sum_{b=1}^{B}\sum_{t=1}^{S}\frac{\partial L_{b,t}}{\partial U} = \sum_{b,t} h_{b,t}^\top \frac{\partial L}{\partial \text{logits}_{b,t}}$$</p>
 <p>而 $\partial L/\partial h_{b,t}$ 对每个 token 位置各自独立，不需要求和，直接继续往前传即可。</p>
 <hr />
 <h3>9.4 Final RMSNorm 反向</h3>
