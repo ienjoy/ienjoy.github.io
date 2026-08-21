@@ -782,13 +782,13 @@ logits: [1, 50257]
 <li><strong>链式法则</strong>：$y=f(x)$，已知 $\dfrac{\partial L}{\partial y}$，则 $\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y}\cdot\dfrac{\partial y}{\partial x}$。</li>
 <li><strong>分支相加</strong>：如果<strong>同一个变量</strong> $x$ 在前向传播中被多个地方使用（比如同一个 $x$ 既算 $y_1=f_1(x)$ 又算 $y_2=f_2(x)$），反向传播时 $x$ 收到的梯度是<strong>所有分支梯度之和</strong>。</li>
 </ol>
-<p>这条规则在 GPT-3 里会在三个地方出现：<strong>残差连接</strong>（$x$ 同时走了 $F(x)$ 支路和跳过 $F$ 的直连支路）、<strong>因果注意力</strong>（一个位置 $j$ 的 $K_j,V_j$ 会被它自己以及后面<strong>被 attention mask 允许连接</strong>的 query 共同读取，梯度要跨这些 query 累加——在稠密因果注意力下这是&quot;后面所有位置&quot;，但 GPT-3 实际用到的局部带状稀疏层里通常只是后面一部分被掩码允许的 query，不是全部；这一点即使不用 GQA、只是标准 MHA 也一样成立；严格说具体范围取决于 attention mask 集合 $\mathcal M$ 怎么定，第五节 5.4 会展开确切条件，不是&quot;因果&quot;这个词本身逻辑上保证&quot;后面所有位置&quot;这么强的结论）；再加上第三节会讲到的<strong>权重共享</strong>（$E$ 同时被输入查表和 Unembedding 两处使用）。</p>
-<p><strong>容易混淆的第三种情况——加法节点反向</strong>：如果 $y=a+b$，其中 $a,b$ 是<strong>两个不同的变量</strong>（不是同一个变量被用了两次），反向只是把上游梯度原样<strong>复制</strong>给两边：$da=dy,\ db=dy$，不涉及&quot;多个分支求和到同一个变量&quot;。第六节的 $x_0=E[\text{token\_id},:]+P[\text{pos},:]$ 就是这种情况——$E$ 的这一行和 $P$ 的这一行是两个不同的变量，各自拿到一份<strong>相同</strong>的梯度副本，这是加法节点的性质，和&quot;分支相加&quot;规则不是一回事（两者都涉及&quot;一个节点收到梯度&quot;，但加法节点是复制，分支相加是求和）。</p>
+<p>这条规则在 GPT-3 里会在三个地方出现：<strong>残差连接</strong>（$x$ 同时走了 $F(x)$ 支路和跳过 $F$ 的直连支路）、<strong>因果注意力</strong>（一个位置 $j$ 的 $K_j,V_j$ 会被它自己以及后面<strong>被 attention mask 允许连接</strong>的 query 共同读取，梯度要跨这些 query 累加——在稠密因果注意力下这是&quot;后面所有位置&quot;，但 GPT-3 实际用到的局部带状稀疏层里通常只是后面一部分被掩码允许的 query，不是全部；这一点即使不用 GQA、只是标准 MHA 也一样成立；严格说具体范围取决于 attention mask 集合 $\mathcal M$ 怎么定，6.5.4 小节会展开确切条件，不是&quot;因果&quot;这个词本身逻辑上保证&quot;后面所有位置&quot;这么强的结论）；再加上 6.3 节会讲到的<strong>权重共享</strong>（$E$ 同时被输入查表和 Unembedding 两处使用）。</p>
+<p><strong>容易混淆的第三种情况——加法节点反向</strong>：如果 $y=a+b$，其中 $a,b$ 是<strong>两个不同的变量</strong>（不是同一个变量被用了两次），反向只是把上游梯度原样<strong>复制</strong>给两边：$da=dy,\ db=dy$，不涉及&quot;多个分支求和到同一个变量&quot;。6.6 节的 $x_0=E[\text{token\_id},:]+P[\text{pos},:]$ 就是这种情况——$E$ 的这一行和 $P$ 的这一行是两个不同的变量，各自拿到一份<strong>相同</strong>的梯度副本，这是加法节点的性质，和&quot;分支相加&quot;规则不是一回事（两者都涉及&quot;一个节点收到梯度&quot;，但加法节点是复制，分支相加是求和）。</p>
 <hr />
 <h3>6.1 一次训练 step 的完整链路</h3>
 <pre><code>X (输入 token ids)
    │
-   ▼ forward（前向文档已讲）
+   ▼ forward（本文第三节已讲）
 logits [1, seq_len, 50257]
    │
    ▼ Loss（交叉熵，与 target token 比较）
@@ -799,30 +799,36 @@ dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
    │
    ▼ optimizer.step()
 </code></pre>
-<p><strong>需要注意</strong>：token id 是离散整数，没有梯度可言。反向传播链路真正的终点是 Embedding 查表之后那个连续向量的梯度，最终落到 Token Embedding 矩阵 $E$ 和 Position Embedding 矩阵 $P$ 本身（第六节）——链路在&quot;查表 + 相加&quot;这个操作处就结束了。</p>
+<p><strong>需要注意</strong>：token id 是离散整数，没有梯度可言。反向传播链路真正的终点是 Embedding 查表之后那个连续向量的梯度，最终落到 Token Embedding 矩阵 $E$ 和 Position Embedding 矩阵 $P$ 本身（6.6 节）——链路在&quot;查表 + 相加&quot;这个操作处就结束了。</p>
 <hr />
 <h3>6.2 起点：Loss 对 logits 的梯度</h3>
-<p>和前向文档一致，交叉熵 + softmax 组合求导：</p>
+<p>和本文第三节一致，交叉熵 + softmax 组合求导：</p>
 <p>$$\frac{\partial L}{\partial \text{logits}_i} = p_i - y_i, \qquad p=\text{softmax}(\text{logits})$$</p>
 <p><strong>小例子</strong>（词表只有 4 个词，方便手算）：logits $=[1.5, 0.2, -0.3, 0.8]$，target 是第 0 个词。</p>
 <p>$$p=\text{softmax}([1.5,0.2,-0.3,0.8]) \approx [0.5170,\ 0.1409,\ 0.0855,\ 0.2567]$$</p>
 <p>$$\frac{\partial L}{\partial \text{logits}} = p-[1,0,0,0] \approx [-0.4830,\ 0.1409,\ 0.0855,\ 0.2567]$$</p>
 <p><strong>校验</strong>：$p$ 之和 $=1$（$0.5170+0.1409+0.0855+0.2567=1.0001\approx1$ ✓，末位是舍入误差），梯度之和 $=0$（$-0.4830+0.1409+0.0855+0.2567=0.0001\approx0$ ✓）。</p>
-<p><strong>平均因子</strong>：上面的 $p-y$ 是单 token、未做平均时的梯度。PyTorch 的 <code>cross_entropy</code> 默认 <code>reduction=&quot;mean&quot;</code>，如果一个 batch 里有效 token 数是 $M$，实际梯度要多除一个 $M$：$\dfrac{\partial L}{\partial\text{logits}_{b,t}}=\dfrac{p_{b,t}-y_{b,t}}{M}$。用 <code>reduction=&quot;sum&quot;</code> 时才不用除。这不改变梯度方向，只改变数值尺度，但下面各节的公式默认都按不除以 $M$ 的口径推导，实现时要留意。</p>
+<p><strong>平均因子</strong>：上面的 $p-y$ 是单 token、未做平均时的梯度。PyTorch 的 <code>cross_entropy</code> 默认 <code>reduction=&quot;mean&quot;</code>，如果一个 batch 里有效 token 数是 $M$，实际梯度要多除一个 $M$：$\dfrac{\partial L}{\partial\text{logits}_{b,t}}=\dfrac{p_{b,t}-y_{b,t}}{M}$。<strong>这里第一次出现 $b,t$ 两个下标，先定义清楚</strong>：真实训练里 logits 是 $[B,S,V]$，$B$=batch size，即一个 batch 里的<strong>序列条数</strong>；$S$=序列长度，即每条序列的 token 位置数。下标 $b=1,\dots,B$ 指第几条序列，$t=1,\dots,S$ 指序列内第几个 <strong>token 位置</strong>（$t$ 沿用时间步的习惯记法）；一对 $(b,t)$ 唯一确定一个 token 位置，整个 batch 共 $B\times S$ 个，因为 padding 的存在 $M\le B\times S$。用 <code>reduction=&quot;sum&quot;</code> 时才不用除。这不改变梯度方向，只改变数值尺度，但下面各节的公式默认都按不除以 $M$ 的口径推导，实现时要留意。</p>
 <blockquote>
-<p><strong>记号约定</strong>：从这里开始，公式按&quot;单个 token&quot;（一行向量）推导，形状写成 $[1,12288]$ 之类，方便对照前向文档。真实实现里所有量都还有 batch 和序列维度（$[B,S,\cdot]$）。对<strong>权重</strong>的梯度（$\partial L/\partial E,\partial L/\partial \gamma,\partial L/\partial W_Q,\dots$）都需要在 $B,S$ 两个维度上求和，因为同一份权重被所有 token 位置共用。对<strong>激活/输入</strong>的梯度不需要这样求和——但 Attention 是例外：一个位置的 $K,V$ 会被多个后续 query token 共同使用，梯度要跨 query 位置累加（具体取决于 attention mask，第五节 5.4 会具体展开确切条件）；此外 GELU、LayerNorm 这类逐 token 操作没有跨 token 依赖，但和 LLaMA-3 的 SwiGLU 不同，GPT-3 的 FFN 只有一条路径（$W_1\to\text{GELU}\to W_2$），不需要处理&quot;分支相加&quot;。</p>
+<p><strong>记号约定</strong>：从这里开始，公式按&quot;单个 token&quot;（一行向量）推导，形状写成 $[1,12288]$ 之类，方便对照本文第三节。真实实现里所有量都还有 batch 和序列维度（$[B,S,\cdot]$），本文公式里这些量一律<strong>省略 $(b,t)$ 下标</strong>。</p>
+<p><strong>loss 分三层写，不能都叫 $L$</strong>：交叉熵是可加的，本文约定</p>
+<p>$$L_{b,t}\ (\text{单个 token 位置}) \quad\longrightarrow\quad L_b=\sum_t L_{b,t}\ (\text{单条序列}) \quad\longrightarrow\quad L=\sum_b L_b=\sum_{b,t}L_{b,t}\ (\text{整个 batch})$$</p>
+<p>（用 <code>reduction=&quot;mean&quot;</code> 时 $1/M$ 已吸收在 $L_{b,t}$ 里，不影响这个分解。）相应地，权重梯度也分三层：$\dfrac{\partial L_{b,t}}{\partial W}$ 是单个位置的贡献，$\dfrac{\partial L_b}{\partial W}=\sum_t\dfrac{\partial L_{b,t}}{\partial W}$ 是单条序列的贡献，只有 $\dfrac{\partial L}{\partial W}=\sum_{b,t}\dfrac{\partial L_{b,t}}{\partial W}$ 才是真正拿去更新权重的梯度。</p>
+<p><strong>为什么必须用不同记号</strong>：$L$ 是整个 batch 上的<strong>一个标量</strong>，$W$ 在计算图里只有<strong>一份</strong>，所以 $\partial L/\partial W$ 在数学上唯一地指求和之后的那个量。若单 token 那一步也写成 $\partial L/\partial W$，两行并排就得到 $\partial L/\partial W=\sum_{b,t}\partial L/\partial W$——这个等式只在 $B\times S=1$ 或梯度恒为零时成立。麻烦的是三层的<strong>形状完全相同</strong>（都和 $W$ 一样），维度检查救不了这个错，只能靠记号区分。本文 6.5 节的 toy 例子把整条序列的 3 个 query 都算全了，所以那里的矩阵式子天然处在 $\partial L_b/\partial W$ 这一层，而不是 $\partial L_{b,t}/\partial W$——读的时候要留意是哪一层。</p>
+<p>求和的来源就是&quot;同一份权重被所有 token 位置共用&quot;：等价于设想每个位置各用一份副本 $W^{(b,t)}$、最后令所有副本相等，多元链式法则要求把这 $B\times S$ 条分支的梯度加起来。</p>
+<p>对<strong>激活/输入</strong>的梯度不需要这样求和——但 Attention 是例外：一个位置的 $K,V$ 会被多个后续 query token 共同使用，梯度要跨 query 位置累加（具体取决于 attention mask，6.5.4 小节会具体展开确切条件）；此外 GELU、LayerNorm 这类逐 token 操作没有跨 token 依赖，但和 LLaMA-3 的 SwiGLU 不同，GPT-3 的 FFN 只有一条路径（$W_1\to\text{GELU}\to W_2$），不需要处理&quot;分支相加&quot;。</p>
 </blockquote>
 <hr />
 <h3>6.3 Unembedding（$U$）反向</h3>
 <p><strong>GPT-3 沿用 GPT-2 架构，Embedding 和 Unembedding 权重是共享的</strong>（weight tying，$U=E^\top$）：这个结论的依据是 OpenAI 官方 GPT-2 实现直接用输入词嵌入矩阵 <code>wte</code> 的转置去算 logits，且 GPT-3 论文明确说明除了稀疏注意力这一处改动外沿用 GPT-2 架构——这是<strong>架构和代码层面的证据</strong>，是判断权重共享与否的主要依据。</p>
-<p>参数量并不能独立证明这一点：把 bias、LayerNorm 的 $\gamma,\beta$、Position Embedding 都按本文采用的架构配置算进去估算（GPT-3 论文没有公开完整的实现细节，部分配置是按 GPT-2 架构推断的），共享权重时总参数量约 174.6B，不共享时约 175.2B——两者四舍五入到十亿这个精度都是&quot;175B&quot;，<strong>不能靠总参数量是否对上标称值来反推是否共享</strong>，前向文档&quot;合计约 1750 亿&quot;这句话对两种情况都成立，只能当作一个大致的相容性检查，不是证据。所以下面的推导按 GPT-2/GPT-3 的真实架构，默认 $U=E^\top$。</p>
+<p>参数量并不能独立证明这一点：把 bias、LayerNorm 的 $\gamma,\beta$、Position Embedding 都按本文采用的架构配置算进去估算（GPT-3 论文没有公开完整的实现细节，部分配置是按 GPT-2 架构推断的），共享权重时总参数量约 174.6B，不共享时约 175.2B——两者四舍五入到十亿这个精度都是&quot;175B&quot;，<strong>不能靠总参数量是否对上标称值来反推是否共享</strong>，本文第三节&quot;合计约 1746 亿参数&quot;这句话对两种情况都成立，只能当作一个大致的相容性检查，不是证据。所以下面的推导按 GPT-2/GPT-3 的真实架构，默认 $U=E^\top$。</p>
 <p>前向：$\text{logits}=h_\text{final}\cdot E^\top,\quad E:[50257,\ 12288]$</p>
 <p>$$\frac{\partial L}{\partial h_\text{final}} = \frac{\partial L}{\partial\text{logits}}\cdot E \quad [1,50257]\times[50257,12288]\to[1,12288]$$</p>
-<p>$$\frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支} = \left(h_\text{final}^\top\cdot\frac{\partial L}{\partial\text{logits}}\right)^{\!\top} \quad [50257,12288]$$</p>
+<p>$$\frac{\partial L_{b,t}}{\partial E}\Big|_\text{Unembedding 分支} = \left(h_\text{final}^\top\cdot\frac{\partial L}{\partial\text{logits}}\right)^{\!\top} \quad [50257,12288]$$</p>
 <p>（因为 $\text{logits}=h_\text{final}E^\top$，对 $E$ 求导要多转置一次，形状上和&quot;$U$ 独立存在&quot;时的 $\partial L/\partial U:[12288,50257]$ 正好是转置关系。）</p>
-<p>上式是单个 token 的贡献，真正的梯度要对所有 $b,t$ 求和：$\dfrac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\left(h_{b,t}^\top\dfrac{\partial L}{\partial\text{logits}_{b,t}}\right)^{\!\top}$。</p>
-<p><strong>关键点——分支相加</strong>：因为 $E$ 被用了两次（一次是这里的 Unembedding，一次是第六节的输入查表），$E$ 最终收到的梯度是两份之和：</p>
-<p>$$\frac{\partial L}{\partial E} = \frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支} + \frac{\partial L}{\partial E}\Big|_\text{查表分支（第六节）}$$</p>
+<p>上式写成 $\partial L_{b,t}/\partial E$，是<strong>单个 token 位置</strong>的贡献；真正的梯度要对所有 $b,t$ 求和：$\dfrac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\dfrac{\partial L_{b,t}}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\left(h_{b,t}^\top\dfrac{\partial L}{\partial\text{logits}_{b,t}}\right)^{\!\top}$。</p>
+<p><strong>关键点——分支相加</strong>：因为 $E$ 被用了两次（一次是这里的 Unembedding，一次是 6.6 节的输入查表），$E$ 最终收到的梯度是两份之和：</p>
+<p>$$\frac{\partial L}{\partial E} = \frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支} + \frac{\partial L}{\partial E}\Big|_\text{查表分支（6.6 节）}$$</p>
 <blockquote>
 <p>如果某个实现选择不共享权重（$U$ 是独立参数），上面的推导会退化成&quot;对 $U$ 单独求梯度、不需要和查表分支相加&quot;这个更简单的情况——如上所述，这种情况下的总参数量（约 175.2B）同样能四舍五入成&quot;175B&quot;，参数量本身不能用来排除这种可能；本文按 GPT-2/GPT-3 论文和官方代码给出的真实架构，以共享权重为主线。</p>
 </blockquote>
@@ -831,8 +837,10 @@ dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
 <p>前向（复习）：</p>
 <p>$$\mu=\frac1d\sum_i x_i,\quad \sigma^2=\frac1d\sum_i(x_i-\mu)^2,\quad \text{std}=\sqrt{\sigma^2+\epsilon}$$</p>
 <p>$$\hat x_i=\frac{x_i-\mu}{\text{std}},\qquad y_i=\gamma_i\hat x_i+\beta_i$$</p>
-<p><strong>对 $\gamma,\beta$ 的梯度</strong>（单个 token，逐元素；真实实现要再对 $b,t$ 求和）：</p>
-<p>$$\frac{\partial L}{\partial\beta_i}=\frac{\partial L}{\partial y_i}, \qquad \frac{\partial L}{\partial\gamma_i}=\frac{\partial L}{\partial y_i}\cdot\hat x_i$$</p>
+<p><strong>对 $\gamma,\beta$ 的梯度</strong>（单个 token 位置，逐元素）：</p>
+<p>$$\frac{\partial L_{b,t}}{\partial\beta_i}=\frac{\partial L}{\partial y_i}, \qquad \frac{\partial L_{b,t}}{\partial\gamma_i}=\frac{\partial L}{\partial y_i}\cdot\hat x_i$$</p>
+<p>真正用于更新的是对所有 $b,t$ 求和后的版本：</p>
+<p>$$\frac{\partial L}{\partial\beta_i}=\sum_{b,t}\frac{\partial L}{\partial y_{b,t,i}}, \qquad \frac{\partial L}{\partial\gamma_i}=\sum_{b,t}\frac{\partial L}{\partial y_{b,t,i}}\cdot\hat x_{b,t,i}$$</p>
 <p><strong>对输入 $x$ 的梯度</strong>：这是 LayerNorm 比 RMSNorm 麻烦的地方——$\mu$ 和 $\sigma^2$ 都依赖<strong>全部</strong> $x_i$，所以 $x_j$ 的变化会通过两条路径影响所有 $\hat x_i$。记 $g_i=\dfrac{\partial L}{\partial y_i}\cdot\gamma_i$（先把缩放吸收掉），结果是：</p>
 <p>$$\frac{\partial L}{\partial x_j} = \frac{1}{\text{std}}\left[g_j - \frac1d\sum_i g_i - \frac{\hat x_j}{d}\sum_i g_i\hat x_i\right]$$</p>
 <p><strong>直觉</strong>：第一项 $g_j/\text{std}$ 是&quot;当作没有归一化&quot;的梯度；第二项 $-\frac1d\sum_i g_i$ 来自&quot;减均值&quot;这一步的耦合（所有维度共享同一个 $\mu$）；第三项 $-\frac{\hat x_j}{d}\sum_i g_i\hat x_i$ 来自&quot;除以标准差&quot;这一步的耦合，结构上和 RMSNorm 里的修正项同源。<strong>作为记忆方式</strong>：可以说&quot;LayerNorm 反向比 RMSNorm 多出中间这一项'减均值'的耦合&quot;——RMSNorm 去掉了减均值这一步，反向公式也就少了这一项。<strong>但严格来说这不是一个精确的算式恒等关系</strong>：LayerNorm 的 $\hat x_i=(x_i-\mu)/\sigma$ 是中心化变量，方差 $\sigma^2$ 也是围绕均值算的；RMSNorm 用的是未中心化的 $x_i/\text{RMS}(x)$，分母也不是围绕均值的标准差。也就是说第一项和第三项虽然形式相似，但两者依赖的标准化变量和统计量本身不同——不能理解成&quot;从 LayerNorm 公式里直接删掉中间那一项就精确等于 RMSNorm 公式&quot;，这里说的&quot;多出一项&quot;只是一个方便记忆的近似类比。</p>
@@ -841,7 +849,7 @@ dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
 </blockquote>
 <hr />
 <h3>6.5 96 层 Block 反向：从最后一层往前，重复 96 次</h3>
-<p>GPT-3 用 <strong>Pre-LN</strong>（LayerNorm 在 Attention/FFN 之前），和 LLaMA-3 的 Pre-RMSNorm 结构完全一样，只是把 RMSNorm 换成 LayerNorm、把 SwiGLU 换成 GELU、没有 RoPE（位置信息是在输入端<strong>相加</strong>的，见第六节）、没有 GQA（K/V head 数等于 Q head 数，不需要处理&quot;一个 KV head 被多个 Q head 共享&quot;）。</p>
+<p>GPT-3 用 <strong>Pre-LN</strong>（LayerNorm 在 Attention/FFN 之前），和 LLaMA-3 的 Pre-RMSNorm 结构完全一样，只是把 RMSNorm 换成 LayerNorm、把 SwiGLU 换成 GELU、没有 RoPE（位置信息是在输入端<strong>相加</strong>的，见 6.6 节）、没有 GQA（K/V head 数等于 Q head 数，不需要处理&quot;一个 KV head 被多个 Q head 共享&quot;）。</p>
 <h4>6.5.1 残差连接反向——两次合并写清楚</h4>
 <p>一个 Block 的输入是 $x$，第一次残差输出 $u=x+\text{Attention}(\text{LN}_1(x))$，第二次残差输出 $y=u+\text{FFN}(\text{LN}_2(u))$。记 $g_y=\partial L/\partial y$ 是从下一层传回来的梯度：</p>
 <p>$$g_u = \underbrace{g_y}_{\text{直通残差}} + \underbrace{J_{\text{LN}_2}^\top J_{\text{FFN}}^\top g_y}_{\text{FFN 分支（5.2+5.3）}}$$</p>
@@ -861,10 +869,10 @@ dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
 </blockquote>
 <p>因为 FFN 只有一条路径（不像 SwiGLU 有 gate/up 两条支路），这里不需要&quot;分支相加&quot;这一步。</p>
 <blockquote>
-<p><strong>省略 bias 的说明</strong>：前向文档明确指出 GPT-3 的投影实际是 $xW+b$，本文和前向文档一样，为了简化只推导 $W$ 的梯度，没有单独写 $b$ 的梯度——这里补一句：bias 的反向极其简单，对任意一个线性层 $Z=XW+b$，都是把该层自己的上游梯度按 $b,t$ 直接求和，$\dfrac{\partial L}{\partial b}=\sum_{b,t}\dfrac{\partial L}{\partial Z_{b,t}}$（这里的 $Z$ 泛指&quot;这一层自己的输出&quot;，不是特指上面 FFN 小节里的 $Y$——比如 $W_2$ 的 bias 对 $dY$ 求和，$W_1$ 的 bias 对 $dz$ 求和，$W_Q$ 的 bias 对 $dq_\text{proj}$ 求和，$W_K,W_V$ 同理对各自的投影输出求和，$W_O$ 的 bias 对 $d\text{attn\_out}$ 求和），对 $W_Q,W_K,W_V,W_O,W_1,W_2$ 每一个都适用同样的原理，只是代入各自层的输出梯度，不需要额外推导。本文后续所有小节都沿用这个简化，不再逐处重复声明。</p>
+<p><strong>省略 bias 的说明</strong>：本文第三节明确指出 GPT-3 的投影实际是 $xW+b$，本章和第三节一样，为了简化只推导 $W$ 的梯度，没有单独写 $b$ 的梯度——这里补一句：bias 的反向极其简单，对任意一个线性层 $Z=XW+b$，都是把该层自己的上游梯度按所有 token 位置直接求和。<strong>这里有个记号陷阱要绕开</strong>：本文的 batch 下标也是 $b$，如果照写成 $\sum_{b,t}$，求和指标 $b$ 就会把被求导的 bias $b$ 遮蔽掉，同一个式子里一个字母指两样东西。改用下面 6.5.4 (f) 小节那个 reshape 后的一维 token 指标 $n=1,\dots,BS$（$\bar Z=\text{reshape}(Z,[BS,\cdot])$）就没有这个问题：$\dfrac{\partial L}{\partial b}=\sum_{n=1}^{BS}\dfrac{\partial L}{\partial \bar Z_{n}}$（这里的 $Z$ 泛指&quot;这一层自己的输出&quot;，不是特指上面 FFN 小节里的 $Y$——比如 $W_2$ 的 bias 对 $dY$ 求和，$W_1$ 的 bias 对 $dz$ 求和，$W_Q$ 的 bias 对 $dq_\text{proj}$ 求和，$W_K,W_V$ 同理对各自的投影输出求和，$W_O$ 的 bias 对 $d\text{attn\_out}$ 求和），对 $W_Q,W_K,W_V,W_O,W_1,W_2$ 每一个都适用同样的原理，只是代入各自层的输出梯度，不需要额外推导。本文后续所有小节都沿用这个简化，不再逐处重复声明。</p>
 </blockquote>
 <h4>6.5.3 第二个 LayerNorm 反向</h4>
-<p>套用第四节公式，把 $\partial L/\partial\hat u$ 转成 $g_u^{(\text{FFN})}=\partial L/\partial u$——这是 5.1 里 $J_{\text{LN}_2}^\top J_{\text{FFN}}^\top g_y$ 这一整项。</p>
+<p>套用 6.4 节公式，把 $\partial L/\partial\hat u$ 转成 $g_u^{(\text{FFN})}=\partial L/\partial u$——这是 6.5.1 里 $J_{\text{LN}_2}^\top J_{\text{FFN}}^\top g_y$ 这一整项。</p>
 <p>$$g_u = g_y + g_u^{(\text{FFN})}$$</p>
 <p>这个 $g_u$ 交给 Attention 分支（5.4～5.5）。</p>
 <h4>6.5.4 多头注意力反向——toy 数值演示</h4>
@@ -911,7 +919,7 @@ dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
 </table>
 <p><strong>假设</strong>下游梯度 $\partial L/\partial o_i=[1,0]$，对 $i=1,2,3$ 都一样（简化假设，真实值来自 O 投影反向）。</p>
 <h5>(a) O 投影反向 + concat 拆分</h5>
-<p>$$\frac{\partial L}{\partial\text{attn\_concat}}=\frac{\partial L}{\partial\text{attn\_out}}W_O^\top,\qquad \frac{\partial L}{\partial W_O}=\text{attn\_concat}^\top\frac{\partial L}{\partial\text{attn\_out}}$$</p>
+<p>$$\frac{\partial L}{\partial\text{attn\_concat}}=\frac{\partial L}{\partial\text{attn\_out}}W_O^\top,\qquad \frac{\partial L_b}{\partial W_O}=\text{attn\_concat}^\top\frac{\partial L}{\partial\text{attn\_out}}$$</p>
 <p>concat 反向就是按 96 个 head 的边界 split，得到每个 head、每个 token 位置的 $\partial L/\partial o_i$。</p>
 <h5>(b) 对 V 的梯度——跨 query token 累加（无需 GQA，标准因果注意力就有）</h5>
 <p>$$\frac{\partial L}{\partial v_j}=\sum_{i\ge j}\alpha_{i,j}\cdot\frac{\partial L}{\partial o_i}$$</p>
@@ -957,30 +965,32 @@ $$ds_{31}=0.248(1-0.751)=0.0616,\quad ds_{32}=0.248(0-0.751)=-0.1866,\quad ds_{3
 <li>单头对应的权重切片：$W_Q^{(h)}\in\mathbb R^{12288\times128}$，$dW_Q^{(h)}=X^\top dQ_h$</li>
 </ul>
 <p>只有在<strong>拼接完全部 96 个头的 $dQ$</strong>之后，$X:[S,12288]$ 和 $dQ:[S,12288]$ 才对得上、可以直接写出完整 $W_Q$ 的梯度：</p>
-<p>$$\frac{\partial L}{\partial W_Q}=X^\top\frac{\partial L}{\partial q_\text{proj}},\qquad \frac{\partial L}{\partial W_K}=X^\top\frac{\partial L}{\partial k_\text{proj}},\qquad \frac{\partial L}{\partial W_V}=X^\top\frac{\partial L}{\partial v_\text{proj}}\qquad (X:[S,12288],\ q_\text{proj}\text{ 已拼接 96 头}:[S,12288])$$</p>
+<p>$$\frac{\partial L_b}{\partial W_Q}=X^\top\frac{\partial L}{\partial q_\text{proj}},\qquad \frac{\partial L_b}{\partial W_K}=X^\top\frac{\partial L}{\partial k_\text{proj}},\qquad \frac{\partial L_b}{\partial W_V}=X^\top\frac{\partial L}{\partial v_\text{proj}}\qquad (X:[S,12288],\ q_\text{proj}\text{ 已拼接 96 头}:[S,12288])$$</p>
 <p>（本节 toy 例子只手算了 1 个头 2 维的数字，上面这组&quot;拼接后&quot;的形状公式是把 96 个头都补齐之后才成立的，不能直接把本节算出的 $[S,2]$ 数字代进 $X:[S,12288]$ 这个式子。）</p>
-<p>但真实训练里 $X$ 是三维张量 $[B,S,12288]$，&quot;$X^\top$&quot;这个记号对三维张量没有标准含义，不能直接照抄上面的写法。严谨的做法是先把 batch 和序列维合并成一维：$\bar X=\text{reshape}(X,[BS,12288])$，$\overline{dQ}=\text{reshape}(dQ,[BS,12288])$，再套用二维公式 $dW_Q=\bar X^\top\overline{dQ}$；或者直接写成指标求和形式 $(dW_Q)_{mn}=\sum_{b,t}X_{b,t,m}\,(dQ)_{b,t,n}$，两种写法等价，都比直接写&quot;$X^\top dQ$&quot;更准确。</p>
+<p>注意分子写的是 $L_b$ 不是 $L$：$X:[S,12288]$ 覆盖的是<strong>一条序列</strong>的所有位置，所以 $X^\top(\cdot)$ 已经把 $\sum_t$ 做掉了，但还差对 $b$ 的求和——这正是记号约定里的中间那一层。但真实训练里 $X$ 是三维张量 $[B,S,12288]$，&quot;$X^\top$&quot;这个记号对三维张量没有标准含义，不能直接照抄上面的写法。严谨的做法是先把 batch 和序列维合并成一维：$\bar X=\text{reshape}(X,[BS,12288])$，$\overline{dQ}=\text{reshape}(dQ,[BS,12288])$，再套用二维公式 $dW_Q=\bar X^\top\overline{dQ}$；或者直接写成指标求和形式 $(dW_Q)_{mn}=\sum_{b,t}X_{b,t,m}\,(dQ)_{b,t,n}$，两种写法等价，都比直接写&quot;$X^\top dQ$&quot;更准确。这两种写法给出的都是完整的 $\dfrac{\partial L}{\partial W_Q}=\sum_{b,t}\dfrac{\partial L_{b,t}}{\partial W_Q}$——换句话说，记号约定里那个 $\sum_{b,t}$ <strong>不是额外套上去的一层循环，它就是 $\bar X^\top\overline{dQ}$ 这次矩阵乘法的收缩维</strong>（长度 $BS$）。$W_K,W_V,W_O,W_1,W_2$ 以及 $E$ 的 Unembedding 分支全都同理。</p>
 <p>（LLaMA-3 那份文档的 toy 例子只手算了一个固定 query 位置，所以需要专门区分 $q_\text{proj}$ 的 $[1,d]$ 和 $k_\text{proj},v_\text{proj}$ 的 $[S,d]$；这里的 toy 例子把 3 个 query 都算全了，就不存在这个不对称。）</p>
 <h5>(g) 汇总：$X$（第一个 LayerNorm 输出）的总梯度</h5>
 <p>$$\frac{\partial L}{\partial X}=\frac{\partial L}{\partial X}\Big|_Q+\frac{\partial L}{\partial X}\Big|_K+\frac{\partial L}{\partial X}\Big|_V$$</p>
 <p>（按 token 位置对齐后相加，理由同 LLaMA-3 文档：每个位置的 $X$ 既是它自己 query 的输入，又是它作为 K/V 提供者的输入。）</p>
 <h4>6.5.5 第一个 LayerNorm 反向</h4>
-<p>套用第四节公式，把 $\partial L/\partial X$ 转成 $g_x^{(\text{attn})}=\partial L/\partial x\big|_\text{Attention 分支}$，再按 5.1 的公式加回 $g_u$：</p>
+<p>套用 6.4 节公式，把 $\partial L/\partial X$ 转成 $g_x^{(\text{attn})}=\partial L/\partial x\big|_\text{Attention 分支}$，再按 6.5.1 的公式加回 $g_u$：</p>
 <p>$$g_x=g_u+g_x^{(\text{attn})}$$</p>
 <p>$g_x$ 就是要传给上一个 Block 的完整梯度。<strong>至此一层 Block 的反向传播完整走完，96 层重复这个流程。</strong></p>
 <hr />
 <h3>6.6 Embedding + 位置编码反向</h3>
-<p>前向：$x_0=E[\text{token\_id},:]+P[\text{pos},:]$，$E$ 的这一行和 $P$ 的这一行是<strong>两个不同的变量</strong>，这是一个<strong>加法节点</strong>（不是第〇节的&quot;分支相加&quot;规则，两者的区别见第〇节末尾）：</p>
+<p>前向：$x_0=E[\text{token\_id},:]+P[\text{pos},:]$，$E$ 的这一行和 $P$ 的这一行是<strong>两个不同的变量</strong>，这是一个<strong>加法节点</strong>（不是 6.0 节的&quot;分支相加&quot;规则，两者的区别见 6.0 节末尾）：</p>
 <p>$$\frac{\partial L}{\partial E[\text{token\_id},:]}\mathrel{+}=\frac{\partial L}{\partial x_0},\qquad \frac{\partial L}{\partial P[\text{pos},:]}\mathrel{+}=\frac{\partial L}{\partial x_0}$$</p>
-<p>两个表各自拿到一份<strong>相同</strong>的梯度副本，不是各分一半。</p>
-<p><strong>Token Embedding $E$ 的完整梯度</strong>：由于第三节说明的权重共享（$U=E^\top$），$E$ 实际上收到<strong>两份</strong>梯度之和，两份的&quot;稀疏程度&quot;完全不同：</p>
+<p>两个表各自拿到一份<strong>相同</strong>的梯度副本，不是各分一半。式子里的 $\mathrel{+}=$ 正是记号约定里 $\sum_{b,t}$ 的实现形态——同一个 token id（或同一个位置 id）在 batch 里可能出现在多个 $(b,t)$ 上，这些位置的梯度都要累加到同一行。写成求和式就是：</p>
+<p>$$\frac{\partial L}{\partial E[v,:]}=\sum_{(b,t)\,:\,\text{token\_id}_{b,t}=v}\frac{\partial L}{\partial x_0^{(b,t)}},\qquad \frac{\partial L}{\partial P[t,:]}=\sum_{b=1}^{B}\frac{\partial L}{\partial x_0^{(b,t)}}$$</p>
+<p>（注意两者的求和范围不同：$E$ 的某一行按 <strong>token id 相同</strong>的位置聚合，$P$ 的第 $t$ 行则是对<strong>所有序列</strong>在同一位置 $t$ 上求和——位置 $t$ 在每条序列里都恰好出现一次，所以 $P$ 的前 $S$ 行必定全部非零，不像 $E$ 那样行稀疏。）</p>
+<p><strong>Token Embedding $E$ 的完整梯度</strong>：由于 6.3 节说明的权重共享（$U=E^\top$），$E$ 实际上收到<strong>两份</strong>梯度之和，两份的&quot;稀疏程度&quot;完全不同：</p>
 <p>$$\frac{\partial L}{\partial E} = \underbrace{\frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}}_{\text{完整的 }[V,d]\text{ 稠密矩阵，几乎每一行都非零}} + \underbrace{\text{scatter\_add}\left(\frac{\partial L}{\partial x_0}\ \text{到对应 token id 那一行}\right)}_{\text{查表分支，只有 batch 里出现过的 token id 对应的行非零}}$$</p>
-<p>Unembedding 分支是第三节那个矩阵乘法 $\left(h_\text{final}^\top\cdot\partial L/\partial\text{logits}\right)^\top$ 直接算出来的完整矩阵，不是&quot;按 token id 取一行&quot;——那是查表分支才有的操作。两者相加后，$E$ 的总梯度通常不再是稀疏的（稠密的 Unembedding 分支已经覆盖了几乎所有行）。这里要注意：即使给查表分支单独设置 <code>sparse=True</code>，也<strong>不能</strong>让 $E$ 的总梯度变稀疏——Unembedding 分支产生的稠密梯度仍然要和查表分支的梯度合并，而且 PyTorch 里能处理稀疏梯度的优化器本来就不多（比如 <code>SparseAdam</code>），&quot;一部分稀疏、一部分稠密&quot;混合处理并不是默认就能做到的事。所以更准确的结论是：查表分支单独拿出来看，数据梯度在行维度上确实是稀疏的；但只要 $E$ 和 Unembedding 权重共享，$E$ 的<strong>完整</strong>梯度通常就得按稠密处理，&quot;稀疏更新&quot;这个说法在权重共享的场景下基本不成立。</p>
+<p>Unembedding 分支是 6.3 节那个矩阵乘法 $\left(h_\text{final}^\top\cdot\partial L/\partial\text{logits}\right)^\top$ 直接算出来的完整矩阵，不是&quot;按 token id 取一行&quot;——那是查表分支才有的操作。两者相加后，$E$ 的总梯度通常不再是稀疏的（稠密的 Unembedding 分支已经覆盖了几乎所有行）。这里要注意：即使给查表分支单独设置 <code>sparse=True</code>，也<strong>不能</strong>让 $E$ 的总梯度变稀疏——Unembedding 分支产生的稠密梯度仍然要和查表分支的梯度合并，而且 PyTorch 里能处理稀疏梯度的优化器本来就不多（比如 <code>SparseAdam</code>），&quot;一部分稀疏、一部分稠密&quot;混合处理并不是默认就能做到的事。所以更准确的结论是：查表分支单独拿出来看，数据梯度在行维度上确实是稀疏的；但只要 $E$ 和 Unembedding 权重共享，$E$ 的<strong>完整</strong>梯度通常就得按稠密处理，&quot;稀疏更新&quot;这个说法在权重共享的场景下基本不成立。</p>
 <p><strong>Position Embedding $P$ 的梯度和 $E$ 的查表分支相比谁更&quot;稀疏&quot;，需要看具体数字，不能一概而论</strong>（这里比较的是 $E$ 的查表分支，不是上一段刚说过的、已经因为权重共享而变稠密的 $E$ 总梯度）：决定 $E$ 查表分支非零行数的不是&quot;batch 大小&quot;本身，而是这个 batch 里<strong>不同 token ID 的数量</strong> $D$，非零行数最多是 $\min(D,|V|)$。GPT-3 达到完整 batch size 阶段后一个训练 batch 约 320 万 token（训练早期存在 batch 逐渐爬升的过程，并非从头到尾都是这个数字），是词表大小 50257 的 60 多倍——即便真实 token 分布是长尾的（常见词远比生僻词出现得多），这么大的 batch 也完全可能覆盖词表中的很大一部分甚至接近全部 token，具体覆盖率取决于真实的 token 频率分布，不能不看数据就断言&quot;远小于词表&quot;。$P$ 在固定 2048 长度的预训练 batch 下通常会覆盖全部 2048 个位置；但既然 $E$ 查表分支在这种大 batch 下覆盖率也可能很高，不能简单地说&quot;$P$ 的覆盖率一定远高于 $E$ 的查表分支&quot;——两者都可能接近满覆盖，只是分母不同（词表 50257 行 vs 位置表 2048 行）。这个&quot;$P$ 通常覆盖率很高&quot;的结论本身，也要限定在<strong>固定长度、或接近最大上下文长度的预训练 batch</strong>下：如果训练用了大量短序列、动态长度 batch，超出实际使用范围的那些位置行同样不会有梯度。</p>
 <p>不管这两个查表分支各自谁的覆盖率更高，真正重要的结论没有变：<strong>$E$ 的总梯度早就因为 Unembedding 分支是稠密的而变成稠密梯度了</strong>——上面这一段只是对&quot;两个查表操作各自产生的局部梯度&quot;做数学上的严谨说明，不影响 $E$ 总梯度稀疏与否的结论。</p>
 <hr />
 <h3>6.7 用代码校验公式</h3>
-<p><strong>LayerNorm 反向校验</strong>（下面这个 <code>layernorm_backward_manual</code> 只校验第四节&quot;单个 token&quot;版本的公式——代码里 <code>x=torch.randn(4)</code> 是一维的，<code>dgamma=dy*xhat</code>、<code>dbeta=dy.clone()</code> 也是按单 token 逐元素写的；如果要直接用在真实的 <code>[B,S,d]</code> 训练张量上，$\gamma,\beta$ 的梯度还需要按第四节说过的那样再对 $b,t$ 求和 $\big(d\gamma=\sum_{b,t}dy_{b,t}\odot\hat x_{b,t}\big)$，这个函数本身不会自动做这一步）：</p>
+<p><strong>LayerNorm 反向校验</strong>（下面这个 <code>layernorm_backward_manual</code> 只校验 6.4 节&quot;单个 token&quot;版本的公式——代码里 <code>x=torch.randn(4)</code> 是一维的，<code>dgamma=dy*xhat</code>、<code>dbeta=dy.clone()</code> 也是按单 token 逐元素写的；如果要直接用在真实的 <code>[B,S,d]</code> 训练张量上，$\gamma,\beta$ 的梯度还需要按 6.4 节说过的那样再对 $b,t$ 求和 $\big(d\gamma=\sum_{b,t}dy_{b,t}\odot\hat x_{b,t}\big)$，这个函数本身不会自动做这一步）：</p>
 <pre><code class="language-python">import torch
 
 def layernorm(x, gamma, beta, eps=1e-5):
@@ -989,7 +999,7 @@ def layernorm(x, gamma, beta, eps=1e-5):
     xhat = (x - mu) / torch.sqrt(var + eps)
     return gamma * xhat + beta
 
-# 直接实现第四节的闭式公式，而不是只打印 autograd 的结果——这样才能真正校验公式本身
+# 直接实现 6.4 节的闭式公式，而不是只打印 autograd 的结果——这样才能真正校验公式本身
 def layernorm_backward_manual(dy, x, gamma, eps=1e-5):
     d = x.shape[-1]
     mu = x.mean(-1, keepdim=True)
@@ -1058,7 +1068,7 @@ print(&quot;dQ[0]（应为 [0,0]）:&quot;, torch.autograd.grad(out2[:, 0].sum()
 </code></pre>
 <hr />
 <h3>6.8 反向传播 FLOPs：&quot;×2&quot;这句话背后的原理</h3>
-<p>前向文档&quot;四、乘上 Batch Size&quot;一节提到&quot;加上反向传播（约为前向的 2 倍）&quot;。&quot;反向约为前向 2 倍&quot;这句话背后的逻辑，和&quot;系数 6&quot;的经验估算是同一套：</p>
+<p>本文第四节&quot;乘上 Batch Size&quot;提到&quot;加上反向传播（约为前向的 2 倍）&quot;。&quot;反向约为前向 2 倍&quot;这句话背后的逻辑，和&quot;系数 6&quot;的经验估算是同一套：</p>
 <p>$$\text{训练 FLOPs}\approx 6NT = \underbrace{2NT}_{\text{前向}}+\underbrace{2NT}_{\text{反向：对权重的梯度}}+\underbrace{2NT}_{\text{反向：对输入的梯度}}$$</p>
 <p>前向占 $2NT$（&quot;1 份&quot;），反向的两项加起来占 $4NT$（&quot;2 份&quot;）——这就是&quot;×2&quot;的来源。这里的 $N$ 是<strong>全模型</strong>参数量；如果只看某一个矩阵（比如 $W_Q$，参数量记为 $N_{W_Q}$，避免和全模型的 $N$ 混用），对应的三次矩阵乘法各自的 FLOPs 是：</p>
 <table>
@@ -1087,12 +1097,13 @@ print(&quot;dQ[0]（应为 [0,0]）:&quot;, torch.autograd.grad(out2[:, 0].sum()
 </tr>
 </tbody>
 </table>
+<p>表中的 $X$ 是整个 batch <strong>展平后</strong>的 $[T,12288]$（$T$ 就是 token 总数 $B\times S$），所以 $\partial L/\partial W_Q=X^\top\partial L/\partial q_\text{proj}$ 这一式<strong>已经包含</strong>了记号约定里的 $\sum_{b,t}$，写的就是真正用于更新的权重梯度，不是 $\partial L_{b,t}/\partial W_Q$ 也不是 $\partial L_b/\partial W_Q$。</p>
 <p>单看 $W_Q$ 这一个矩阵，三项合计是 $6TN_{W_Q}$——<strong>&quot;×2&quot;这个原理本身没问题</strong>。把这套逻辑对 $W_Q,W_K,W_V,W_O,W_1,W_2$ 等所有参数矩阵各自算一遍再加总，<strong>还需要单独加上共享的 Embedding/Unembedding 矩阵 $E$</strong>——$E$ 虽然在输入端只是按 token id 查表（几乎不产生 FLOPs），但在输出端的 Unembedding 步骤（$\text{logits}=h_\text{final}E^\top$）里，它确确实实参与了一次和 $W_Q$ 等同量级的大规模稠密矩阵乘法，同样要按 $6TN_E$ 计入。把 $W_Q,\dots,W_1,W_2$ 这些矩阵和 $E$ 加总，$\sum N_{W_\cdot}+N_E\approx N$（全模型参数量；是约等于不是恒等——$N$ 还包含 LayerNorm 的 $\gamma,\beta$、各线性层 bias、Position Embedding 这些<strong>不</strong>经过大矩阵乘法的参数，它们相对 175B 小到可以忽略；但 $E$ 不属于这一类可忽略项，只是它本身占全模型参数量的比例也不大——约 6.18 亿，占 175B 的 0.35%左右——量级上同样可以忽略，但道理和&quot;不参与大矩阵乘法&quot;不一样，是&quot;参与了但占比小&quot;），才回到开头那个全模型的 $6NT$：$N$ 在&quot;单个矩阵的 $6TN_{W_Q}$&quot;和&quot;全模型的 $6NT$&quot;这两处指的不是同一个数字，只是背后的原理相同，容易在核对数字时混淆，这里特意拆开说明一下。</p>
 <p>直接用参数量算前向 FLOPs（$2NT$，$N=175\times10^9$，$T=3.2\times10^6$ token/step——<strong>这里需要说明</strong>：$3.2\text{M}$ token/step 是 GPT-3 论文里<strong>完整 batch size 阶段</strong>的口径；论文提到训练早期会把 batch size 从较小规模逐渐爬升到完整值，所以并非所有训练 step 都固定是这个 token 数，这里用的是达到完整 batch 之后的稳态值，不影响下面 $6NT$ 这套框架本身）：</p>
 <p>$$2NT = 2\times175\times10^9\times3.2\times10^6\approx1.12\times10^{18}$$</p>
-<p><strong>更新</strong>：本文早期版本在这里核对时发现，前向文档当时的&quot;一层 Block 共 6 次大矩阵乘法&quot;算法把 $W_1,W_2$（形状 $[12288,49152]$ 和 $[49152,12288]$，比 $W_Q$ 大 <strong>4 倍</strong>）当成和 $W_Q,W_K,W_V,W_O$ 同样大小来计算，导致前向 FLOPs 少算了约 2 倍；一层的等价规模应该是：</p>
+<p><strong>更新</strong>：本文早期版本在这里核对时发现，本文第四节当时的&quot;一层 Block 共 6 次大矩阵乘法&quot;算法把 $W_1,W_2$（形状 $[12288,49152]$ 和 $[49152,12288]$，比 $W_Q$ 大 <strong>4 倍</strong>）当成和 $W_Q,W_K,W_V,W_O$ 同样大小来计算，导致前向 FLOPs 少算了约 2 倍；一层的等价规模应该是：</p>
 <p>$$\underbrace{4}_{W_Q,W_K,W_V,W_O（各 1 倍）} + \underbrace{2\times4}_{W_1,W_2（各 4 倍）} = 12 \text{ 个 } W_Q\text{ 等价规模，而不是 6 个}$$</p>
-<p><strong>这一处已经在前向文档中修正</strong>（目前前向文档给出的前向 FLOPs 约 $1.14\times10^{18}$、完整训练 step 约 $3.4\times10^{18}$，和这里 $2NT\approx1.12\times10^{18}$、$6NT\approx3.36\times10^{18}$ 的结果一致），本文这里保留这段推导过程，是为了说清楚&quot;×2&quot;背后 $6NT=2NT+2NT+2NT$ 这套逻辑是怎么来的，不再是&quot;待核对的分歧&quot;。</p>
+<p><strong>这一处已经在本文第四节中修正</strong>（目前第四节给出的前向 FLOPs 约 $1.14\times10^{18}$、完整训练 step 约 $3.4\times10^{18}$，和这里 $2NT\approx1.12\times10^{18}$、$6NT\approx3.36\times10^{18}$ 的结果一致），本文这里保留这段推导过程，是为了说清楚&quot;×2&quot;背后 $6NT=2NT+2NT+2NT$ 这套逻辑是怎么来的，不再是&quot;待核对的分歧&quot;。</p>
 <p>&quot;$6NT\approx2NT_\text{前向}+4NT_\text{反向}$&quot;这个近似框架本身是成立的；它同样忽略了 attention 的 $S^2$ 项、softmax/LayerNorm/GELU 等非矩阵乘法开销、Embedding 查表、优化器更新和梯度检查点重算，不是精确恒等式。</p>
 <hr />
 <h3>6.9 一次完整训练 step 的伪代码</h3>
@@ -1113,7 +1124,7 @@ print(&quot;dQ[0]（应为 [0,0]）:&quot;, torch.autograd.grad(out2[:, 0].sum()
 </code></pre>
 <hr />
 <h3>6.10 训练显存 vs 推理缓存</h3>
-<p>前向文档没有涉及 KV Cache，这里按 GPT-3 的参数自己估算一下（标准 MHA，96 head、每头 128 维、96 层，FP16）：</p>
+<p>本文前五节（前向部分）没有涉及 KV Cache，这里按 GPT-3 的参数自己估算一下（标准 MHA，96 head、每头 128 维、96 层，FP16）：</p>
 <p>$$\text{每 token 每层：}\ 2\times96\times128\times2\text{ 字节}=49{,}152\text{ 字节}=48\text{ KiB}\ (1\text{KiB}=1024\text{ 字节})$$</p>
 <p>$$96\text{ 层：}\ 96\times48\text{ KiB}=4{,}608\text{ KiB}=4.5\text{ MiB/token}$$</p>
 <p>如果上下文长度按 2048 算（GPT-3 常见上下文长度）：$2048\times4.5\text{ MiB}=9{,}216\text{ MiB}=\textbf{9 GiB}$（二进制口径，恰好整除）；换算成十进制的 GB（$1\text{GB}=10^9$ 字节）约为 <strong>9.66 GB</strong>（batch=1，FP16）。GPT-3 没有 GQA，K/V head 数等于 Q head 数，所以这个数字比 LLaMA-3 同规模模型的 KV Cache 大得多；另外这是<strong>假设全部 96 层都用完整稠密因果注意力</strong>算出的上界——如果按 GPT-3 论文实际的稠密/稀疏交替架构，稀疏层的 KV Cache 未必需要保留全部历史位置，实际占用可能更低。</p>
@@ -1125,7 +1136,7 @@ print(&quot;dQ[0]（应为 [0,0]）:&quot;, torch.autograd.grad(out2[:, 0].sum()
 <hr />
 <h3>6.11 小结</h3>
 <blockquote>
-<p>GPT-3 的反向传播 = 交叉熵梯度 $p-y$ 从 logits 出发，经过 Unembedding、Final LayerNorm、96 层 Block（每层：残差直通 + GELU FFN 反向（单路径，无需分支相加）+ LayerNorm 反向（作为记忆类比可以说&quot;比 RMSNorm 多一项'减均值'耦合&quot;，但严格说两者用的标准化统计量本身不同，不是从 LayerNorm 公式里删掉一项就精确等于 RMSNorm，第四节有展开）+ 多头注意力反向（O 投影 → concat 拆分 → 对 V 加权求和反向【跨 query token 累加】→ softmax 反向【第一个 token 的边界情况：单元素 softmax 导数恒为 0】→ 对 Q、K 的梯度【K 同样跨 query token 累加，无需 GQA 也一样】→ Q/K/V 投影反向）+ 残差直通 + LayerNorm 反向），最终把梯度分别加回 Token Embedding 和 Position Embedding 两张表。核心仍是链式法则 + &quot;分支相加&quot;这条规则；GPT-3 没有 GQA、RoPE、SwiGLU 这些 LLaMA-3 特有的复杂度，&quot;跨 query token 的梯度累加&quot;这一条在稠密因果注意力、以及 GPT-3 实际使用的局部带状稀疏层里都会发生，和用不用 GQA 无关；但严格来说这不是&quot;因果&quot;这个词本身逻辑上保证的，而是取决于 attention mask 具体让哪些位置重叠（第五节 5.4 的范围说明有展开）。前向文档里&quot;反向约为前向 2 倍&quot;这句话，来源正是 $6NT\approx2NT_\text{前向}+4NT_\text{反向}$ 这套近似估算。</p>
+<p>GPT-3 的反向传播 = 交叉熵梯度 $p-y$ 从 logits 出发，经过 Unembedding、Final LayerNorm、96 层 Block（每层：残差直通 + GELU FFN 反向（单路径，无需分支相加）+ LayerNorm 反向（作为记忆类比可以说&quot;比 RMSNorm 多一项'减均值'耦合&quot;，但严格说两者用的标准化统计量本身不同，不是从 LayerNorm 公式里删掉一项就精确等于 RMSNorm，6.4 节有展开）+ 多头注意力反向（O 投影 → concat 拆分 → 对 V 加权求和反向【跨 query token 累加】→ softmax 反向【第一个 token 的边界情况：单元素 softmax 导数恒为 0】→ 对 Q、K 的梯度【K 同样跨 query token 累加，无需 GQA 也一样】→ Q/K/V 投影反向）+ 残差直通 + LayerNorm 反向），最终把梯度分别加回 Token Embedding 和 Position Embedding 两张表。核心仍是链式法则 + &quot;分支相加&quot;这条规则；GPT-3 没有 GQA、RoPE、SwiGLU 这些 LLaMA-3 特有的复杂度，&quot;跨 query token 的梯度累加&quot;这一条在稠密因果注意力、以及 GPT-3 实际使用的局部带状稀疏层里都会发生，和用不用 GQA 无关；但严格来说这不是&quot;因果&quot;这个词本身逻辑上保证的，而是取决于 attention mask 具体让哪些位置重叠（6.5.4 小节的范围说明有展开）。本文第四节里&quot;反向约为前向 2 倍&quot;这句话，来源正是 $6NT\approx2NT_\text{前向}+4NT_\text{反向}$ 这套近似估算。</p>
 </blockquote>
 <h2 id="sec7">七、总结</h2>
 <blockquote>
