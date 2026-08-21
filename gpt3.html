@@ -822,11 +822,18 @@ dL/dW_Q, dL/dW_K, dL/dW_V, dL/dW_O, dL/dW_1, dL/dW_2, dL/dE, dL/dPosEmb, ...
 <h3>6.3 Unembedding（$U$）反向</h3>
 <p><strong>GPT-3 沿用 GPT-2 架构，Embedding 和 Unembedding 权重是共享的</strong>（weight tying，$U=E^\top$）：这个结论的依据是 OpenAI 官方 GPT-2 实现直接用输入词嵌入矩阵 <code>wte</code> 的转置去算 logits，且 GPT-3 论文明确说明除了稀疏注意力这一处改动外沿用 GPT-2 架构——这是<strong>架构和代码层面的证据</strong>，是判断权重共享与否的主要依据。</p>
 <p>参数量并不能独立证明这一点：把 bias、LayerNorm 的 $\gamma,\beta$、Position Embedding 都按本文采用的架构配置算进去估算（GPT-3 论文没有公开完整的实现细节，部分配置是按 GPT-2 架构推断的），共享权重时总参数量约 174.6B，不共享时约 175.2B——两者四舍五入到十亿这个精度都是&quot;175B&quot;，<strong>不能靠总参数量是否对上标称值来反推是否共享</strong>，本文第三节&quot;合计约 1746 亿参数&quot;这句话对两种情况都成立，只能当作一个大致的相容性检查，不是证据。所以下面的推导按 GPT-2/GPT-3 的真实架构，默认 $U=E^\top$。</p>
-<p>前向：$\text{logits}=h_\text{final}\cdot E^\top,\quad E:[50257,\ 12288]$</p>
-<p>$$\frac{\partial L}{\partial h_\text{final}} = \frac{\partial L}{\partial\text{logits}}\cdot E \quad [1,50257]\times[50257,12288]\to[1,12288]$$</p>
-<p>$$\frac{\partial L_{b,t}}{\partial E}\Big|_\text{Unembedding 分支} = \left(h_\text{final}^\top\cdot\frac{\partial L}{\partial\text{logits}}\right)^{\!\top} \quad [50257,12288]$$</p>
-<p>（因为 $\text{logits}=h_\text{final}E^\top$，对 $E$ 求导要多转置一次，形状上和&quot;$U$ 独立存在&quot;时的 $\partial L/\partial U:[12288,50257]$ 正好是转置关系。）</p>
-<p>上式写成 $\partial L_{b,t}/\partial E$，是<strong>单个 token 位置</strong>的贡献；真正的梯度要对所有 $b,t$ 求和：$\dfrac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\dfrac{\partial L_{b,t}}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\left(h_{b,t}^\top\dfrac{\partial L}{\partial\text{logits}_{b,t}}\right)^{\!\top}$。</p>
+<p>前向：$\text{logits}_{b,t}=h_{b,t}\cdot E^\top,\quad E:[50257,\ 12288]$</p>
+<p><strong>本小节把 $(b,t)$ 下标全部写出</strong>，不用 6.2 的省略约定——下面两个梯度的性质根本不同，下标忽有忽无正是最容易读错的地方。记 $h_{b,t}$ 为第 $(b,t)$ 个 token 位置的 $h_\text{final}$（$b=1..B$ 标是哪条序列，$t=1..S$ 标该序列内的第几个 token 位置）：</p>
+<p>$$\frac{\partial L}{\partial h_{b,t}} = \frac{\partial L}{\partial\text{logits}_{b,t}}\cdot E \quad [1,50257]\times[50257,12288]\to[1,12288]$$</p>
+<p>$$\frac{\partial L_{b,t}}{\partial E}\Big|_\text{Unembedding 分支} = \left(h_{b,t}^\top\cdot\frac{\partial L}{\partial\text{logits}_{b,t}}\right)^{\!\top} \quad [50257,12288]$$</p>
+<p>（因为 $\text{logits}_{b,t}=h_{b,t}E^\top$，对 $E$ 求导要多转置一次，形状上和&quot;$U$ 独立存在&quot;时的 $\partial L_{b,t}/\partial U:[12288,50257]$ 正好是转置关系。）</p>
+<p><strong>为什么上式分子是 $L$、下式却必须是 $L_{b,t}$</strong>——两者是不同类的对象：</p>
+<ul>
+<li>上式对<strong>激活</strong> $h_{b,t}$ 求导。每个位置有自己的一份 $h$，而位置 $(b,t)$ 的 $h$ 只参与生成它自己那一份 loss，所以 $\dfrac{\partial L}{\partial h_{b,t}}=\dfrac{\partial L_{b,t}}{\partial h_{b,t}}$，两种写法数值相同，写 $L$ 不会有歧义。</li>
+<li>下式对<strong>权重</strong> $E$ 求导。$E$ 在计算图里只有一份，被全部 $B\times S$ 个位置共用（还要再被下面的输入查表分支用一次），所以 $\dfrac{\partial L}{\partial E}$ 在数学上唯一地指<strong>求和之后</strong>那个量。单个位置的那一份不是 $L$ 对 $E$ 的导数，只是求和式里的一项，只能写成 $\dfrac{\partial L_{b,t}}{\partial E}$。两者形状都是 $[50257,12288]$，维度检查发现不了，只能靠记号区分。</li>
+</ul>
+<p>Unembedding 分支真正的梯度，是把所有 token 位置的贡献加起来：</p>
+<p>$$\frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b=1}^{B}\sum_{t=1}^{S}\frac{\partial L_{b,t}}{\partial E}\Big|_\text{Unembedding 分支}=\sum_{b,t}\left(h_{b,t}^\top\frac{\partial L}{\partial\text{logits}_{b,t}}\right)^{\!\top}$$</p>
 <p><strong>关键点——分支相加</strong>：因为 $E$ 被用了两次（一次是这里的 Unembedding，一次是 6.6 节的输入查表），$E$ 最终收到的梯度是两份之和：</p>
 <p>$$\frac{\partial L}{\partial E} = \frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支} + \frac{\partial L}{\partial E}\Big|_\text{查表分支（6.6 节）}$$</p>
 <blockquote>
@@ -985,7 +992,7 @@ $$ds_{31}=0.248(1-0.751)=0.0616,\quad ds_{32}=0.248(0-0.751)=-0.1866,\quad ds_{3
 <p>（注意两者的求和范围不同：$E$ 的某一行按 <strong>token id 相同</strong>的位置聚合，$P$ 的第 $t$ 行则是对<strong>所有序列</strong>在同一位置 $t$ 上求和——位置 $t$ 在每条序列里都恰好出现一次，所以 $P$ 的前 $S$ 行必定全部非零，不像 $E$ 那样行稀疏。）</p>
 <p><strong>Token Embedding $E$ 的完整梯度</strong>：由于 6.3 节说明的权重共享（$U=E^\top$），$E$ 实际上收到<strong>两份</strong>梯度之和，两份的&quot;稀疏程度&quot;完全不同：</p>
 <p>$$\frac{\partial L}{\partial E} = \underbrace{\frac{\partial L}{\partial E}\Big|_\text{Unembedding 分支}}_{\text{完整的 }[V,d]\text{ 稠密矩阵，几乎每一行都非零}} + \underbrace{\text{scatter\_add}\left(\frac{\partial L}{\partial x_0}\ \text{到对应 token id 那一行}\right)}_{\text{查表分支，只有 batch 里出现过的 token id 对应的行非零}}$$</p>
-<p>Unembedding 分支是 6.3 节那个矩阵乘法 $\left(h_\text{final}^\top\cdot\partial L/\partial\text{logits}\right)^\top$ 直接算出来的完整矩阵，不是&quot;按 token id 取一行&quot;——那是查表分支才有的操作。两者相加后，$E$ 的总梯度通常不再是稀疏的（稠密的 Unembedding 分支已经覆盖了几乎所有行）。这里要注意：即使给查表分支单独设置 <code>sparse=True</code>，也<strong>不能</strong>让 $E$ 的总梯度变稀疏——Unembedding 分支产生的稠密梯度仍然要和查表分支的梯度合并，而且 PyTorch 里能处理稀疏梯度的优化器本来就不多（比如 <code>SparseAdam</code>），&quot;一部分稀疏、一部分稠密&quot;混合处理并不是默认就能做到的事。所以更准确的结论是：查表分支单独拿出来看，数据梯度在行维度上确实是稀疏的；但只要 $E$ 和 Unembedding 权重共享，$E$ 的<strong>完整</strong>梯度通常就得按稠密处理，&quot;稀疏更新&quot;这个说法在权重共享的场景下基本不成立。</p>
+<p>Unembedding 分支是 6.3 节那个矩阵乘法 $\sum_{b,t}\left(h_{b,t}^\top\,\partial L/\partial\text{logits}_{b,t}\right)^\top$ 直接算出来的完整矩阵，不是&quot;按 token id 取一行&quot;——那是查表分支才有的操作。两者相加后，$E$ 的总梯度通常不再是稀疏的（稠密的 Unembedding 分支已经覆盖了几乎所有行）。这里要注意：即使给查表分支单独设置 <code>sparse=True</code>，也<strong>不能</strong>让 $E$ 的总梯度变稀疏——Unembedding 分支产生的稠密梯度仍然要和查表分支的梯度合并，而且 PyTorch 里能处理稀疏梯度的优化器本来就不多（比如 <code>SparseAdam</code>），&quot;一部分稀疏、一部分稠密&quot;混合处理并不是默认就能做到的事。所以更准确的结论是：查表分支单独拿出来看，数据梯度在行维度上确实是稀疏的；但只要 $E$ 和 Unembedding 权重共享，$E$ 的<strong>完整</strong>梯度通常就得按稠密处理，&quot;稀疏更新&quot;这个说法在权重共享的场景下基本不成立。</p>
 <p><strong>Position Embedding $P$ 的梯度和 $E$ 的查表分支相比谁更&quot;稀疏&quot;，需要看具体数字，不能一概而论</strong>（这里比较的是 $E$ 的查表分支，不是上一段刚说过的、已经因为权重共享而变稠密的 $E$ 总梯度）：决定 $E$ 查表分支非零行数的不是&quot;batch 大小&quot;本身，而是这个 batch 里<strong>不同 token ID 的数量</strong> $D$，非零行数最多是 $\min(D,|V|)$。GPT-3 达到完整 batch size 阶段后一个训练 batch 约 320 万 token（训练早期存在 batch 逐渐爬升的过程，并非从头到尾都是这个数字），是词表大小 50257 的 60 多倍——即便真实 token 分布是长尾的（常见词远比生僻词出现得多），这么大的 batch 也完全可能覆盖词表中的很大一部分甚至接近全部 token，具体覆盖率取决于真实的 token 频率分布，不能不看数据就断言&quot;远小于词表&quot;。$P$ 在固定 2048 长度的预训练 batch 下通常会覆盖全部 2048 个位置；但既然 $E$ 查表分支在这种大 batch 下覆盖率也可能很高，不能简单地说&quot;$P$ 的覆盖率一定远高于 $E$ 的查表分支&quot;——两者都可能接近满覆盖，只是分母不同（词表 50257 行 vs 位置表 2048 行）。这个&quot;$P$ 通常覆盖率很高&quot;的结论本身，也要限定在<strong>固定长度、或接近最大上下文长度的预训练 batch</strong>下：如果训练用了大量短序列、动态长度 batch，超出实际使用范围的那些位置行同样不会有梯度。</p>
 <p>不管这两个查表分支各自谁的覆盖率更高，真正重要的结论没有变：<strong>$E$ 的总梯度早就因为 Unembedding 分支是稠密的而变成稠密梯度了</strong>——上面这一段只是对&quot;两个查表操作各自产生的局部梯度&quot;做数学上的严谨说明，不影响 $E$ 总梯度稀疏与否的结论。</p>
 <hr />
