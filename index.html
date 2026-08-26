@@ -120,6 +120,11 @@
   .norm:hover,
   .norm:focus-visible { border-color: var(--green); }
 
+  .prob .tag { color: var(--yellow); }
+  .prob .open { color: var(--yellow); }
+  .prob:hover,
+  .prob:focus-visible { border-color: var(--yellow); }
+
   footer {
     margin-top: 2.5rem;
     color: var(--muted);
@@ -166,6 +171,13 @@
       <span class="tag">残差 · 归一化 · 推导</span>
       <h2>为什么造不出一种"稳定的 Norm"</h2>
       <p>从"残差连接"这个名字为何名不副实说起：Pre/Post-Norm 的"前后"到底指谁；前向值明明都贴着 x，凭什么一个稳一个不稳；最后用三行推导证明——只要一个算子真的归一化，它的雅可比就必然把径向方向打成 0，所以"雅可比接近 I 的 Norm"根本不存在。附 DeepNorm / ReZero / Fixup 三条绕开的路线。</p>
+      <span class="open">阅读文章 →</span>
+    </a>
+
+    <a class="card prob" href="llm-baihua.html" style="grid-column: 1 / -1;">
+      <span class="tag">概率论 · 附可复现实验</span>
+      <h2>LLM 白话：概率论在大模型里到底起什么作用</h2>
+      <p>从 Embedding、前向与反向传播讲起，最后落到一个尖锐的问题——凭什么说 softmax 吐出的那 5 万个数是「概率」，而不是别的什么？内含链式法则的逐步数值拆解、马尔可夫假设的对照、四条可证伪的证据，以及两个能在自己电脑上跑通的实验：校准曲线，和用一台自造的「说话机器」检验网络到底有没有学到真实概率。</p>
       <span class="open">阅读文章 →</span>
     </a>
   </section>
