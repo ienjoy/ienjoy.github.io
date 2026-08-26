@@ -300,6 +300,14 @@
 <a class="lv2" href="#s116">第一部分：校准实验</a>
 <a class="lv2" href="#s117">第二部分：合成语法实验</a>
 <a class="lv2" href="#s118">收口：两个实验各证明了什么</a>
+<a class="lv1" href="#s119">附录 J：训练 / 推理 / 部署——三个常被混在一起的词</a>
+<a class="lv2" href="#s120">1. 逐项对一下</a>
+<a class="lv2" href="#s121">2. 实验二根本没有"模型"可部署——它是从零训练</a>
+<a class="lv2" href="#s122">3. 实验一虽然加载了 GPT-2，但用的是评分模式，不是生成</a>
+<a class="lv2" href="#s123">4. "部署"这个词是最大的偏差</a>
+<a class="lv2" href="#s124">5. 四个词的分界表（温习时看这张就够）</a>
+<a class="lv2" href="#s125">6. 那这两个实验到底是什么</a>
+<a class="lv2" href="#s126">7. 但有一点直觉是对的</a>
 </div>
 <p>embedding让语义可以用数值在高维空间表示。前向让这个数值得以通过权重预测一段token最大可能落是词表里哪一个词token的上下文，即这段上下文token最大可能后面出现词表里哪一个token。反向让预测误差得以用来修正参数，以达到最大可能预测到正确的下一个token. 注意力算法设计让已经生成的token对即将生成的下一个token有什么影响可以通过数值计算来量化。而这个主意力参数也可以通过反向传递，用预测误差来反馈调节自己的参数。帮我看看我关于LLM的想法。</p>
 <p>你的理解<strong>非常精准，且抓住了 Transformer / LLM 最核心的本质与设计哲学</strong>。</p>
@@ -1390,6 +1398,59 @@ for _ in range(N - 2):
 <ul><li>只有实验二 → 可以说"人造世界太简单，真语言未必"</li><li>只有实验一 → 可以说"自洽不等于对，也许它和现实一起偏了"</li></ul>
 <blockquote><p><strong>两条合起来，「那些数不是概率」这个立场就很难维持了</strong>——你得同时解释：为什么它在有答案的世界里能命中答案，又为什么它在没答案的世界里跟现实频率严丝合缝。</p></blockquote>
 <p><strong>做完这两个实验，附录 H 那场争论你就不是在听我说，而是自己验过了。</strong></p>
+<hr>
+<h1 id="s119">附录 J：训练 / 推理 / 部署——三个常被混在一起的词</h1>
+<blockquote><p><strong>问题：</strong> 看完附录 I 的实验说明后，我明白：这是在本地部署一个小推理模型的操作。我说错了吗？</p></blockquote>
+<p><strong>说错了一半——而且错的那一半，正好是附录 I 第 0 节专门要讲的那件事。</strong></p>
+<h2 id="s120">1. 逐项对一下</h2>
+<div class="table-wrap"><table><thead><tr><th>说法</th><th>实验一（校准）</th><th>实验二（合成语法）</th></tr></thead><tbody><tr><td><strong>本地</strong></td><td>✅ 对</td><td>✅ 对</td></tr><tr><td><strong>小模型</strong></td><td>✅ GPT-2 124M，约 500 MB</td><td>⚠️ 不是下载的，是<strong>自己造的</strong>（词表 3 个词、2 层、32 维）</td></tr><tr><td><strong>推理</strong></td><td>⚠️ 广义算，但<strong>它一个字都不生成</strong></td><td>❌ <strong>这是训练</strong>，不是推理</td></tr><tr><td><strong>部署</strong></td><td>❌ 不是</td><td>❌ 不是</td></tr></tbody></table></div>
+<h2 id="s121">2. 实验二根本没有"模型"可部署——它是从零训练</h2>
+<pre><code class="language-python">model = 小模型()          # 随机初始化，什么都不会
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+for 步 in range(2001):    # ← 这是训练循环
+    损失.backward()
+    opt.step()</code></pre>
+<p><strong>全程不下载任何模型、不连 HuggingFace、不加载任何权重。</strong> 纯 PyTorch，从随机数开始，两三分钟训出来。</p>
+<blockquote><p>它跟"部署推理模型"是<strong>反方向</strong>的事：一个是用现成的模型，一个是造一个新的。</p></blockquote>
+<h2 id="s122">3. 实验一虽然加载了 GPT-2，但用的是评分模式，不是生成</h2>
+<pre><code>生成模式（日常熟悉的）：  给提示词   →  模型往下写   →  看它写了什么
+评分模式（实验用的）：    给整篇文章 →  模型一字不写 →  看每个位置的概率</code></pre>
+<p>实验一是把一本书整个喂进去，<strong>问它"这里你本来会预测什么"</strong>，然后掀开答案对照。它从头到尾没有产出过一个字。</p>
+<blockquote><p>严格说，"推理（inference）"在机器学习里指<strong>不更新梯度的前向传播</strong>，按这个定义评分<strong>也算</strong>推理，所以这个说法不算错。但如果"推理"指的是"给它个问题让它回答"，那实验一不是那个。</p></blockquote>
+<h2 id="s123">4. "部署"这个词是最大的偏差</h2>
+<p><strong>部署 = 起一个常驻服务，有接口，能被反复调用。</strong></p>
+<pre><code class="language-bash"># 这才叫部署 —— 跑完之后有进程一直挂着，别的程序能通过 HTTP 反复调它
+ollama run qwen2.5:0.5b
+# 或
+python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-0.5B</code></pre>
+<p>而实验一是：</p>
+<pre><code class="language-bash">python calib.py     # 跑几分钟，打印一张表，进程退出</code></pre>
+<p><strong>没有服务、没有接口、没有常驻进程。脚本跑完就没了。</strong></p>
+<h2 id="s124">5. 四个词的分界表（温习时看这张就够）</h2>
+<div class="table-wrap"><table><thead><tr><th></th><th><strong>训练</strong></th><th><strong>推理 · 生成</strong></th><th><strong>推理 · 评分</strong></th><th><strong>部署</strong></th></tr></thead><tbody><tr><td>目的</td><td>造出或改进模型</td><td>让模型产出内容</td><td>测量模型的判断</td><td>让模型可被反复调用</td></tr><tr><td>有没有梯度</td><td><strong>有</strong></td><td>无</td><td>无</td><td>无</td></tr><tr><td>模型参数</td><td><strong>会变</strong></td><td>不变</td><td>不变</td><td>不变</td></tr><tr><td>产出物</td><td>一组权重</td><td>新文本</td><td>每个位置的概率</td><td>一个服务端点</td></tr><tr><td>进程</td><td>跑完退出</td><td>跑完退出</td><td>跑完退出</td><td><strong>常驻</strong></td></tr><tr><td>要不要下载模型</td><td>不一定</td><td>要</td><td>要</td><td>要</td></tr><tr><td>本文哪个实验</td><td><strong>实验二</strong></td><td>都不是</td><td><strong>实验一</strong></td><td>都不是</td></tr></tbody></table></div>
+<blockquote><p>一句话记法： <strong>训练改参数，推理不改参数，部署是把推理挂成服务。</strong> 而"生成"和"评分"都是推理——区别在于<strong>模型说不说话</strong>。</p></blockquote>
+<h2 id="s125">6. 那这两个实验到底是什么</h2>
+<p>把它们串起来的不是"部署"，是<strong>验证</strong>：</p>
+<pre><code>实验一：借一个现成的小模型来「测量」
+        —— 它自报的概率，跟现实频率对不对得上
+
+实验二：从零「造」一个模型来「检验」
+        —— 已知真概率的世界里，它能不能把真概率学回来</code></pre>
+<p>一个是<strong>借模型测它</strong>，一个是<strong>造模型试它</strong>。目的都是回答附录 H 那个问题：<strong>凭什么说那些数是概率。</strong></p>
+<h2 id="s126">7. 但有一点直觉是对的</h2>
+<p>两个实验确实共享一件事：<strong>在自己的机器上装 PyTorch、把模型跑起来</strong>。这跟"本地部署"在体感上很接近——混淆多半是从这儿来的。</p>
+<p>如果目标是<strong>本地部署一个能对话的小模型</strong>（起服务、有接口、能问答），那是另一件事，而且比这两个实验简单得多：</p>
+<pre><code class="language-bash"># 装 Ollama（macOS）
+brew install ollama
+
+# 拉一个小模型并对话 —— 它会自动起一个常驻服务
+ollama run qwen2.5:0.5b
+
+# 服务起来后，任何程序都能调它
+curl http://localhost:11434/api/generate \
+  -d '{"model":"qwen2.5:0.5b","prompt":"你好"}'</code></pre>
+<blockquote><p><strong>这三件事是互补的，不是一回事：</strong> 部署 = 把模型<strong>用起来</strong>；附录 I 两个实验 = 把模型<strong>验一验</strong>；训练 = 把模型<strong>造出来</strong>。</p></blockquote>
 <hr>
 <p class="subtitle" style="margin-top:2rem">iEnjoy &middot; GPU &amp; LLM Learning Notes</p>
 </div>
