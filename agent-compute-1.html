@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从 Embedding 到概率论：LLM 计算过程的白话拆解，附两个可动手复现的实验">
+<title>从 GPT-3 前向传播到 Agent 计算过程（一）</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {
+    delimiters: [
+      {left: '$$', right: '$$', display: true},
+      {left: '$', right: '$', display: false}
+    ],
+    ignoredTags: ['script','noscript','style','textarea','pre','code'],
+    throwOnError: false
+  });"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e2e4ed;
+    --muted: #8b8fa8;
+    --accent: #5b8af0;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --code-bg: #12151f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', 'Noto Serif SC', serif;
+    font-size: 16px;
+    line-height: 1.8;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 860px; margin: 0 auto; }
+  .back-link {
+    display: inline-block;
+    margin-bottom: 1.4rem;
+    color: var(--muted);
+    text-decoration: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.9rem;
+  }
+  .back-link:hover { color: var(--accent); }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.6rem;
+    margin: 2.6rem 0 0.4rem;
+    line-height: 1.3;
+  }
+  h1:first-of-type { margin-top: 0; }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 2.4rem 0 0.8rem;
+    padding-left: 0.8rem;
+    border-left: 3px solid var(--accent);
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 1.8rem 0 0.6rem;
+  }
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--yellow);
+    margin: 1.4rem 0 0.4rem;
+  }
+  p { margin: 0.7rem 0; }
+  blockquote {
+    border-left: 3px solid var(--green);
+    background: #0d1f17;
+    color: var(--green);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 6px 6px 0;
+  }
+  blockquote p { margin: 0.3rem 0; color: var(--green); }
+  blockquote strong { color: #6ee7b7; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  .table-wrap { overflow-x: auto; }
+  th {
+    background: var(--surface);
+    color: var(--accent);
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 600;
+  }
+  td {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  tr:nth-child(even) td { background: #13161f; }
+  code {
+    background: var(--code-bg);
+    color: #7dd3fc;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin: 1.1rem 0;
+  }
+  pre code {
+    background: none;
+    color: #94a3b8;
+    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    white-space: pre;
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  ul, ol { padding-left: 1.6rem; margin: 0.6rem 0; }
+  li { margin: 0.3rem 0; }
+  strong { color: #fff; }
+  em { color: var(--muted); font-style: italic; }
+  .container a:not(.back-link):not([class^="lv"]) { color: var(--accent); word-break: break-all; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.4rem 0; }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+    font-style: italic;
+  }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.4rem;
+    margin: 1.5rem 0 2.5rem;
+    font-size: 0.93rem;
+    max-height: 460px;
+    overflow-y: auto;
+  }
+  .toc-title {
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .toc a { color: var(--muted); text-decoration: none; display: block; padding: 0.15rem 0; }
+  .toc a:hover { color: var(--text); }
+  .toc a.lv1 { color: var(--text); font-weight: 600; margin-top: 0.5rem; }
+  .toc a.lv2 { padding-left: 1.2rem; font-size: 0.88rem; }
+  @media (max-width: 680px) {
+    body { padding: 1rem 0.6rem; font-size: 15px; }
+    table { font-size: 0.84rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+<nav aria-label="站点导航"><a class="back-link" href="index.html">&larr; 返回文章首页</a></nav>
+
+<h1 style="margin-top:0">从 GPT-3 的一次前向传播，到 Agent 的一次完整任务（一）</h1>
+<p class="subtitle">接着 GPT-3 那篇往下走：现代模型的一次前向传播改了什么（GQA、MLA、MoE），推理时的 prefill、decode 与 KV 缓存，Agent Loop 在 token 层面到底发生了什么，前缀缓存为什么让 30 轮对话只需重算 5%，注意力何时反超 FFN，“Graph”到底指什么，以及 Loop 里试出来的能力如何通过强化学习内化进权重。</p>
+<div class="toc">
+<div class="toc-title">目录</div>
+<a class="lv2" href="#s1">0. 先给结论：几种常见说法哪里对、哪里要改、漏了什么</a>
+<a class="lv2" href="#s2">1. 最底层：一次前向传播，现代模型改了什么、没改什么</a>
+<a class="lv2" href="#s3">2. 推理的两个阶段：prefill 和 decode，以及 KV 缓存</a>
+<a class="lv2" href="#s4">3. Agent Loop 在 token 层面到底发生了什么</a>
+<a class="lv2" href="#s5">4. 为什么每轮重发全部对话却不会每轮重算：前缀缓存</a>
+<a class="lv2" href="#s6">5. 上下文越长越贵：注意力什么时候反超 FFN</a>
+<a class="lv2" href="#s7">6. "Graph"到底指什么</a>
+<a class="lv2" href="#s8">7. 训练侧：Loop 里试出来的东西怎么"内化"进权重</a>
+<a class="lv2" href="#s9">8. 修正后的完整对照表</a>
+<a class="lv2" href="#s10">9. 不确定或没有公开的部分</a>
+<a class="lv2" href="#s11">来源</a>
+</div>
+<blockquote><p>前置阅读：本站<a href="gpt3.html">《GPT-3 计算规模、信息流与能耗》</a><br>缘起：一段关于"GPT-3 的 FFN 架构如何演进到 Agent Loop / Graph"的讨论。讨论里流传着几种说法，有对有错，第 0 节逐条核对，其余各节把漏掉的计算过程补全。<br>整理日期：2026-11-21<br>写法约定：先用大白话把事情说完，再点出正式名字。所有数字都给出推导或来源；能自己算的都用代码复算过。闭源模型（Claude、GPT 系列）的内部架构没有公开，凡是涉及它们内部的地方都会明说"未公开"，用开源模型（DeepSeek-V3、Llama 3.1）的公开配置做具体演示。</p></blockquote>
+<hr>
+<h2 id="s1">0. 先给结论：几种常见说法哪里对、哪里要改、漏了什么</h2>
+<p>谈"从 GPT-3 到 Agent"时，常听到这样一组说法：GPT-3 的 FFN 很大、占了大部分参数；Agent 的 Loop 相当于把计算深度动态展开，不再受 96 层限制；Graph 充当路由和门控，出错就沿图的边回退；早期模型做不到在中间调用外部验证器；Loop 里试出来的能力再通过蒸馏、强化学习回流进权重。下面逐条核对。</p>
+<h3>0.1 说对了的</h3>
+<div class="table-wrap"><table><thead><tr><th>常见说法</th><th>判断</th><th>依据</th></tr></thead><tbody><tr><td>FFN 中间维度 49,152 = 12,288 × 4；W₁、W₂ 各约 6.04 亿参数</td><td>✅ 对</td><td>12288 × 49152 = 603,979,776</td></tr><tr><td>FFN 约占模型 2/3 参数</td><td>✅ 对</td><td>96 层 × 8d² = 1,159.6 亿，占 1,750 亿的 66.3%</td></tr><tr><td>Agent 的"下一层"往往是<strong>同一个</strong>模型，只是上下文变长了</td><td>✅ 对，这是最关键的一句</td><td>见第 3 节</td></tr><tr><td>线上跑 Loop 时不做梯度下降，权重不变</td><td>✅ 对</td><td>见第 3 节</td></tr><tr><td>蒸馏和强化学习发生在离线训练阶段，把"绕路试出来的能力"内化进权重</td><td>✅ 方向对</td><td>见第 7 节，DeepSeek-R1 是公开的实例</td></tr></tbody></table></div>
+<h3>0.2 需要修正的</h3>
+<p><strong>修正 1：GPT-3 的 FFN 位置写成了"Attention → Add &amp; Norm → FFN"，这是原始 Transformer（2017）的写法，不是 GPT-3 的。</strong> GPT-2/GPT-3 用的是"先归一化、再计算、再加回残差"的顺序，正式名字叫 <strong>Pre-LN</strong>：</p>
+<pre><code>x → LayerNorm → Attention → (+x) → LayerNorm → FFN → (+) → 下一层</code></pre>
+<p>本站 GPT-3 那篇第 6.5 节也写了"GPT-3 用 Pre-LN"，第三节的数据流图也是这个顺序。"Add &amp; Norm 之后"这个说法与此矛盾，以 Pre-LN 为准。</p>
+<p><strong>修正 2："Loop 相当于动态展开计算深度，不再受限于固定的 96 层"——这句话容易让人理解错。</strong> 准确的说法是：<strong>每生成一个 token，仍然要完整穿过全部层，一层不多一层不少。</strong> Loop 增加的不是"层数"，而是"token 的数量"。模型多想 1 万个 token，就是把那套固定深度的前向传播多跑 1 万次。所以更准确的描述是"用更多推理算力（更多 token）换能力"，而不是"深度变成动态的"。</p>
+<p><strong>修正 3："Graph 充当路由与门控机制，出错就沿图的边回退"——把两种不同的东西混在了一起。</strong> Anthropic 把这类系统分成两种（第 6 节详细讲）：</p>
+<ul><li>一种是<strong>工程师事先写死流程</strong>的：第一步干什么、第二步干什么、什么条件走哪条分支，都是代码定的。正式名字叫 <strong>workflow（工作流）</strong>。LangGraph 这类"图"框架画出来的图，就是这种。</li><li>另一种是<strong>模型自己决定下一步</strong>的：给它一堆工具，它自己决定调哪个、调几次、什么时候停。正式名字叫 <strong>agent</strong>。Anthropic 现在对 agent 的定义就是一句话：在一个循环里自主使用工具的 LLM。</li></ul>
+<p>Claude Code 这类编程 agent 属于后一种：结构上就是一个 while 循环，没有一张预先画好的大图。所谓"验证"，大多是模型自己调用"跑测试"这个工具、读到报错、再决定改哪里——验证器是一个<strong>工具</strong>，不是图里的门控节点。所谓"回退"，大多也不是真的把状态倒回去，而是模型看到错误后在后面追加新的修改。</p>
+<p><strong>修正 4："早期模型无法在中间调用外部验证器"——这句话对，但现代模型其实也不能。</strong> 工具调用发生在<strong>两个 token 之间</strong>，不发生在一次前向传播的<strong>层与层之间</strong>。第 37 层算到一半去跑一下编译器——这种事在今天的主流模型里也不存在。区别只在于：现代系统允许模型输出一段"我要调用工具"的特殊 token 后停下来，等外部程序把结果写回上下文，再继续生成。</p>
+<h3>0.3 这类讨论通常没讲、但对理解"计算过程"最要紧的</h3>
+<ol><li><strong>KV 缓存</strong>：为什么上下文变长后，生成每个新 token 不需要把前面所有 token 重算一遍（第 2 节）。</li><li><strong>prefill / decode 两阶段</strong>：读入上下文和逐字生成，是两种瓶颈完全不同的计算（第 2 节）。</li><li><strong>跨请求的前缀缓存（prompt caching）</strong>：Agent 每一轮都要把完整对话重新发给模型，为什么不会每轮都重算（第 4 节）。</li><li><strong>FFN 在现代大模型里已经被"专家混合"替换</strong>：这恰好接着 GPT-3 那篇第一部分讲的 FFN（第 1 节）。</li><li><strong>长上下文的代价</strong>：上下文长到一定程度，注意力的计算量会反超 FFN（第 5 节）。</li></ol>
+<hr>
+<h2 id="s2">1. 最底层：一次前向传播，现代模型改了什么、没改什么</h2>
+<h3>1.1 没改的</h3>
+<p>一个 token 进来 → 查表变成向量 → 一层一层往上算 → 最后一层输出词表上的概率 → 选一个 token。每层仍然是"注意力 + 前馈网络 + 残差"的结构，深度固定。这部分和 GPT-3 那篇第三节完全一样。</p>
+<h3>1.2 改了的（以公开配置的开源模型为例）</h3>
+<div class="table-wrap"><table><thead><tr><th>部件</th><th>GPT-3（2020）</th><th>现代主流（Llama 3.1 405B / DeepSeek-V3）</th><th>改动目的</th></tr></thead><tbody><tr><td>归一化</td><td>LayerNorm（减均值、除标准差）</td><td>RMSNorm（只除均方根，不减均值）</td><td>省一点计算，效果相当</td></tr><tr><td>位置信息</td><td>学一张"位置表"，加在输入端</td><td>RoPE：在算注意力时把 Q、K 按位置"旋转"一个角度</td><td>更容易外推到更长的上下文</td></tr><tr><td>FFN 激活</td><td>GELU，一条路径</td><td>SwiGLU：两条路径相乘（配置里写作 <code>silu</code>）</td><td>同参数量下效果更好</td></tr><tr><td>注意力里存的 K、V</td><td>每个头一份（96 份）</td><td><strong>分组共享</strong>或<strong>压缩存储</strong>（见 1.3）</td><td>大幅减小 KV 缓存</td></tr><tr><td>FFN 本身</td><td>一个大 FFN，每个 token 全用</td><td><strong>专家混合</strong>：很多个小 FFN，每个 token 只用几个（见 1.4）</td><td>总参数大、每 token 计算量小</td></tr></tbody></table></div>
+<h3>1.3 K、V 怎么省：分组共享（GQA）和压缩（MLA）</h3>
+<p>先说为什么要省。GPT-3 那篇讲过：生成第 i 个 token 时，它的 query 要和前面<strong>所有</strong>位置的 key 做点积，再用权重把所有 value 加起来。前面那些位置的 K、V 每次都要用，所以推理时会把它们存起来，不重算（第 2 节详述）。存下来的这些东西越多，显存就越紧张。</p>
+<p><strong>分组共享</strong>：GPT-3 有 96 个 query 头，就配 96 套 K、V。Llama 3.1 405B 有 128 个 query 头，却只配 <strong>8 套</strong> K、V，每 16 个 query 头共用一套。正式名字叫 <strong>GQA（Grouped-Query Attention，分组查询注意力）</strong>。公开配置：<code>num_attention_heads: 128</code>、<code>num_key_value_heads: 8</code>、126 层、隐藏维度 16384。</p>
+<p><strong>压缩存储</strong>：DeepSeek-V3 走得更远。它不存完整的 K、V，而是每层每个 token 只存一个 512 维的"压缩向量"，再加 64 维专门携带位置信息的部分；真正用的时候再从压缩向量里"解压"出 128 个头的 K、V。正式名字叫 <strong>MLA（Multi-head Latent Attention，多头潜在注意力）</strong>。公开配置：<code>kv_lora_rank: 512</code>、<code>qk_rope_head_dim: 64</code>、61 层。</p>
+<p>每个 token 需要存多少字节（按 16 位浮点，每个数 2 字节；公式 = 2(K和V) × 层数 × 每层存的维度 × 2 字节）：</p>
+<div class="table-wrap"><table><thead><tr><th>模型</th><th>每层每 token 存的数</th><th>每 token 字节</th><th>128K 上下文合计</th></tr></thead><tbody><tr><td>GPT-3（96 头全存）</td><td>K、V 各 12288</td><td>4.72 MB</td><td>618 GB</td></tr><tr><td>Llama 3.1 405B（8 组共享）</td><td>K、V 各 8×128=1024</td><td>0.52 MB</td><td>67.6 GB</td></tr><tr><td>同一模型假如不分组（128 套）</td><td>K、V 各 16384</td><td>8.26 MB</td><td>1,082 GB</td></tr><tr><td>DeepSeek-V3（压缩）</td><td>512 + 64 = 576（K、V 合并在压缩向量里）</td><td>0.070 MB</td><td>9.2 GB</td></tr><tr><td>DeepSeek-V3 假如不压缩</td><td>K 192×128 + V 128×128</td><td>5.00 MB</td><td>655 GB</td></tr></tbody></table></div>
+<p>（DeepSeek-V3 一行的公式是 61 层 × 576 × 2 字节，不再乘"K 和 V 两份"，因为压缩向量同时承载两者。）</p>
+<p>结论：压缩把 KV 缓存缩小了约 <strong>71 倍</strong>；分组共享缩小了 16 倍。这一点对 Agent 至关重要——Agent 的上下文动辄几万到几十万 token，如果按 GPT-3 的方式存，单个对话的缓存就要上百 GB。</p>
+<h3>1.4 FFN 变成"专家混合"（MoE）——接着 GPT-3 那篇第一部分讲</h3>
+<p>GPT-3：每层一个大 FFN（12288 → 49152 → 12288），每个 token <strong>全部</strong> 12.08 亿参数都参与计算。</p>
+<p>DeepSeek-V3：每层放 <strong>257 个小 FFN</strong>（1 个"共享专家"所有 token 都用 + 256 个"路由专家"），每个小 FFN 是 7168 → 2048 → 7168（SwiGLU 结构，有三个矩阵）。每个 token 来了，先由一个很小的打分器给 256 个路由专家各打一个分，选分数最高的 <strong>8 个</strong>，再加上那个共享专家，一共只算 9 个小 FFN。这个打分器正式名字叫 <strong>router（路由器）</strong>，整套结构叫 <strong>MoE（Mixture of Experts，专家混合）</strong>。</p>
+<p>公开配置：<code>n_routed_experts: 256</code>、<code>n_shared_experts: 1</code>、<code>num_experts_per_tok: 8</code>、<code>moe_intermediate_size: 2048</code>、<code>hidden_size: 7168</code>、<code>first_k_dense_replace: 3</code>（前 3 层仍用普通 FFN）、<code>scoring_func: sigmoid</code>。</p>
+<p>用公开配置算（代码复算）：</p>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>计算</th><th>结果</th></tr></thead><tbody><tr><td>一个小专家的参数</td><td>3 × 7168 × 2048</td><td>4,404 万</td></tr><tr><td>一层 MoE 全部专家</td><td>257 × 4,404 万</td><td>113.2 亿</td></tr><tr><td>一层 MoE 每个 token 实际用到的</td><td>9 × 4,404 万</td><td>3.96 亿</td></tr><tr><td>全模型总参数</td><td>58 层 MoE + 3 层普通 FFN + 61 层注意力 + 输入输出嵌入</td><td><strong>约 6,709 亿</strong>（官方 671B）</td></tr><tr><td>全模型每 token 激活参数</td><td>同上，但每层只算 9 个专家</td><td><strong>374 亿</strong>（官方 37B）</td></tr></tbody></table></div>
+<p>这里和"每 token 只算一部分"有关的一个细节：选专家这一步用 sigmoid 打分、取前 8 名，然后把这 8 个分数归一化成权重，8 个专家的输出按权重加起来。DeepSeek-V3 还给每个专家加了一个只用于"选谁"的偏置：某个专家被选得太多就把它调低，太少就调高，以免负载不均（论文 2.1.2 节）。</p>
+<p><strong>和 Agent 的关系</strong>：每个 token 的计算量大约是"2 × 激活参数" FLOPs。GPT-3 每 token 约 3,500 亿次浮点运算；DeepSeek-V3 虽然总参数大 3.8 倍，每 token 只要约 740 亿次。Agent 一次任务要生成和读入大量 token，每 token 便宜多少，直接决定 Agent 跑一圈的成本。</p>
+<blockquote><p>[补充说明] 闭源模型（Claude、GPT-4 以后的 OpenAI 模型等）是否用 MoE、用几个专家、K/V 怎么存，官方都没有公开。上面所有数字只对 DeepSeek-V3、Llama 3.1 成立，用来说明"现代模型是怎么算的"，不能直接套到闭源模型上。</p></blockquote>
+<hr>
+<h2 id="s3">2. 推理的两个阶段：prefill 和 decode，以及 KV 缓存</h2>
+<p>GPT-3 那篇主要讲的是<strong>训练</strong>时的前向/反向。Agent 的问题全部发生在<strong>推理</strong>时，而推理有一个训练时没有的关键结构。</p>
+<h3>2.1 大白话版</h3>
+<p>假设上下文里已经有 5 万个 token（系统提示 + 工具说明 + 之前的对话），现在要生成回答。</p>
+<p><strong>第一步，读入。</strong> 把这 5 万个 token 一次性送进模型，<strong>所有位置并行</strong>地穿过全部层。每层每个位置算出的 K、V 存下来。这一步只为得到两样东西：存好的 K、V，以及最后一个位置输出的"下一个词"概率。正式名字叫 <strong>prefill（预填充）</strong>。</p>
+<p><strong>第二步，逐字生成。</strong> 拿到第一个新 token 后，只把<strong>这一个</strong> token 送进模型。它在每一层算出自己的 Q、K、V，自己的 K、V 追加到存储里，自己的 Q 去和存储里全部 5 万零 1 个 K 做点积。生成下一个 token 时重复一遍。正式名字叫 <strong>decode（解码）</strong>，存下来的 K、V 叫 <strong>KV cache（KV 缓存）</strong>。</p>
+<p>没有 KV 缓存的话，每生成一个 token 都要把前面 5 万个 token 重新算一遍；有了它，前面的部分只算一次。</p>
+<h3>2.2 两个阶段的瓶颈不一样</h3>
+<ul><li><strong>prefill</strong>：5 万个 token 同时乘同一组权重，相当于 GPT-3 那篇里那种"高瘦矩阵 × 方阵"，每从显存读一个权重就能用上 5 万次。GPU 的计算单元能吃饱，瓶颈是<strong>算力</strong>。</li><li><strong>decode</strong>：一次只来 1 个 token，每读一个权重只用 1 次（矩阵 × 向量）。计算单元大部分时间在等数据从显存搬过来，瓶颈是<strong>显存带宽</strong>，再加上还要把整个 KV 缓存读一遍。</li></ul>
+<p>一个衡量办法叫"算术强度"：每从显存搬 1 字节，做多少次运算。硬件有个分界点（峰值算力 ÷ 显存带宽），低于它就是在等数据。H100 这个分界点大约在 295 左右；而 batch 为 1 的 decode，16 位权重每 2 字节只做 2 次运算（一乘一加），强度约为 1，离分界点差两个数量级。</p>
+<p>服务商的应对是把很多用户的 decode 请求拼成一批，一次读权重服务一批人，这叫 <strong>continuous batching（连续批处理）</strong>；更大的系统会把 prefill 和 decode 放到不同的机器上，叫 <strong>PD 分离（prefill-decode disaggregation）</strong>。</p>
+<h3>2.3 这件事为什么对 Agent 特别重要</h3>
+<p>Agent 的典型模式是：<strong>读得多，写得少</strong>。每一轮要读入越来越长的上下文（工具结果、文件内容、报错），但每轮只写几百个 token（一个工具调用或一小段代码）。所以 Agent 的主要成本在 prefill 和 KV 缓存上，这就引出第 4 节的前缀缓存。</p>
+<hr>
+<h2 id="s4">3. Agent Loop 在 token 层面到底发生了什么</h2>
+<p>常说"Agent 每一轮都拼接新的上下文"，这一节把这句话展开成具体步骤。以 Claude API 的公开文档为准（其他厂商的形式不同，机制一样）。</p>
+<h3>3.1 一轮循环的完整步骤</h3>
+<p><strong>① 程序发请求。</strong> 外面那层程序（正式名字叫 <strong>harness</strong>，比如 Claude Code 本身）把这些东西打包发给模型：系统提示、工具清单（每个工具的名字、说明、参数格式）、到目前为止的全部消息。</p>
+<p><strong>② 服务器把它变成一串 token。</strong> JSON 里的结构（谁说的、哪段是工具说明）会被转换成带特殊标记的一长串 token。具体模板没公开，但可以理解为"系统提示 token + 工具说明 token + 对话 token"首尾相接。</p>
+<p><strong>③ prefill。</strong> 这一长串整体读入，建 KV 缓存（第 4 节说明为什么大部分其实不用重算）。</p>
+<p><strong>④ decode，模型自己决定写什么。</strong> 它可能先写一段思考（开启思考功能时，正式叫 thinking block），然后写一段特定格式的"我要调用工具 X，参数是 Y"。这一段也只是模型生成的普通 token，只不过格式是训练出来的。</p>
+<p><strong>⑤ 停下来。</strong> 模型写完工具调用后生成一个结束标记，服务器停止解码，返回给程序：<code>stop_reason: "tool_use"</code>，内容里有一个 <code>tool_use</code> 块（工具名 + JSON 参数）。</p>
+<p><strong>⑥ 程序执行工具。</strong> 模型看不到工具的实现，只看到你给的参数格式和你返回的结果。程序在自己的机器上真的去跑命令、读文件、跑测试。</p>
+<p><strong>⑦ 把结果写回对话。</strong> 程序构造一条新消息，里面是 <code>tool_result</code> 块，然后把"原来的全部消息 + 模型刚才的回复 + 这条工具结果"作为下一次请求发出去。</p>
+<p><strong>⑧ 重复。</strong> 只要 <code>stop_reason</code> 还是 <code>"tool_use"</code> 就继续；变成 <code>"end_turn"</code>（答完了）、<code>"max_tokens"</code>（写到上限）等其他值就退出。</p>
+<p>用伪代码写就是：</p>
+<pre><code class="language-python">messages = [用户的请求]
+while True:
+    resp = 调用模型(system, tools, messages)      # ②③④ 在服务器端
+    messages.append(resp 的全部内容)               # 包括思考块、工具调用，必须原样放回
+    if resp.stop_reason != "tool_use":
+        break                                       # ⑧ 退出
+    results = [执行(块.name, 块.input) for 块 in resp 里的 tool_use 块]   # ⑥
+    messages.append({"role": "user", "content": results})             # ⑦</code></pre>
+<h3>3.2 几个容易误解的细节</h3>
+<ul><li><strong>服务器端没有"记忆"</strong>：每次请求都要把完整对话重新发一遍。模型的"状态"就是这串消息，也就是说，轮与轮之间传递的介质是离散的文本（见第 8 节对照表）。</li><li><strong>思考块必须原样放回</strong>：Claude 文档要求在工具循环中把模型的思考块完整、不改动地传回去，否则会报错或推理断档。一个工具循环算作同一个"助手回合"，模型可以在两次工具调用之间继续思考，正式名字叫 <strong>interleaved thinking（交错思考）</strong>。</li><li><strong>一次可以调多个工具</strong>：模型可以在一个回复里放多个 <code>tool_use</code> 块（并行工具调用），程序都执行完后一起放回。</li><li><strong>工具分两种</strong>：一种在你的程序里跑（上面讲的）；另一种在 Anthropic 的服务器上跑（比如网页搜索），你不用自己构造 <code>tool_result</code>。</li></ul>
+<h3>3.3 对照 GPT-3 那篇：一次"Agent 步骤"在硬件上是什么</h3>
+<pre><code>一次工具循环 ≈
+    prefill（新增部分的 token，每个都穿过全部层）
+  + decode（几十到几千个 token，每个都穿过全部层，每个都读一遍 KV 缓存）
+  + 等待外部程序执行工具（这段时间 GPU 不为你计算）</code></pre>
+<p>所以"Loop"不是一种新的网络结构，它是<strong>同一套固定深度的前向传播，被外部程序反复调用</strong>，每次调用时上下文比上一次长一截。</p>
+<hr>
+<h2 id="s5">4. 为什么每轮重发全部对话却不会每轮重算：前缀缓存</h2>
+<h3>4.1 原理</h3>
+<p>第 2 节说过，同一个对话里，前面 token 的 K、V 存下来就不用重算。这个思路可以<strong>跨请求</strong>使用：如果第 10 轮请求的开头 3 万个 token 和第 9 轮一字不差，那这 3 万个 token 在每一层的 K、V 也一模一样（因为是因果注意力，前面的位置看不到后面的内容），直接拿第 9 轮存的用即可。</p>
+<p>开源推理引擎 vLLM 的做法：把 KV 缓存切成固定大小的块，每块用"这一块的 token + 它前面全部 token"算一个哈希值；新请求来了，逐块算哈希，命中的块直接复用。这叫 <strong>automatic prefix caching（自动前缀缓存）</strong>。</p>
+<p>商业 API 也提供同样的东西。Anthropic 的叫 <strong>prompt caching</strong>，范围按"工具 → 系统提示 → 消息"这个顺序，从开头一直到标记点。价格倍数（相对于普通输入价格）：</p>
+<div class="table-wrap"><table><thead><tr><th>操作</th><th>价格倍数</th></tr></thead><tbody><tr><td>写入缓存（保留 5 分钟）</td><td>1.25 倍</td></tr><tr><td>写入缓存（保留 1 小时）</td><td>2 倍</td></tr><tr><td>读取缓存（命中）</td><td>0.1 倍（部分最新模型更低，如 Opus 5.5 / Sonnet 5.5 为 0.05 倍）</td></tr></tbody></table></div>
+<p>这里有个硬约束：<strong>只要前面有一个字变了，从那个字往后全部失效。</strong> 这是因果注意力的数学性质决定的，不是厂商的规定。所以 Agent 设计里有一条规矩：稳定的东西（系统提示、工具清单）放最前面，变化的东西往后放，不要在中间插入或修改旧内容。</p>
+<h3>4.2 一个具体算例：30 轮的编程 Agent</h3>
+<p>假设（这些是演示用的假设值，不是测量值）：</p>
+<ul><li>系统提示 + 工具说明：20,000 token</li><li>每轮新增：模型输出约 300 token + 工具结果约 1,200 token ≈ 1,500 token</li><li>一共 30 轮</li></ul>
+<div class="table-wrap"><table><thead><tr><th>口径</th><th>计算</th><th>结果</th></tr></thead><tbody><tr><td>每轮都从头读入，30 轮累计读入</td><td>Σ(20,000 + 1,500k)，k = 0…29</td><td><strong>1,252,500 token</strong></td></tr><tr><td>真正第一次出现、需要重新计算的</td><td>20,000 + 1,500 × 30</td><td><strong>65,000 token</strong></td></tr><tr><td>其余可以从缓存直接拿的</td><td>1,252,500 − 65,000</td><td>1,187,500 token（占 95%）</td></tr><tr><td>输入费用（以普通输入价为 1）</td><td>无缓存：1,252,500；有缓存：新内容按 1.25、旧内容按 0.1</td><td>有缓存约为无缓存的 <strong>15.8%</strong></td></tr></tbody></table></div>
+<p>最后一轮上下文 65,000 token，按第 1.3 节的数字，这一个对话的 KV 缓存：Llama 3.1 405B 约 33.5 GB，DeepSeek-V3 约 4.6 GB。</p>
+<p>这就是为什么 Agent 能做成产品：如果没有前缀缓存，30 轮的计算量要多约 19 倍。</p>
+<hr>
+<h2 id="s6">5. 上下文越长越贵：注意力什么时候反超 FFN</h2>
+<h3>5.1 一个可以直接用 GPT-3 那篇的公式推出来的交叉点</h3>
+<p>对一个 token、一层来说（沿用 GPT-3 那篇的口径，FLOPs = 2 × 乘加次数）：</p>
+<ul><li>线性层（Q、K、V、O 四个投影 + FFN 两个矩阵）：2 × 12d² = <strong>24d²</strong>，和上下文长度无关</li><li>注意力打分和加权求和（QKᵀ 和 AV）：<strong>4Ld</strong>，L 是这个 token 能看到的上下文长度（GPT-3 那篇第四节的 4TSd 就是这个乘上 T 个 token）</li></ul>
+<p>两者相等时：4Ld = 24d²，即 <strong>L = 6d</strong>。</p>
+<p>GPT-3 的 d = 12,288，交叉点在 <strong>73,728 token</strong>：</p>
+<div class="table-wrap"><table><thead><tr><th>上下文长度 L</th><th>线性层（每 token）</th><th>注意力（每 token，96 层合计）</th></tr></thead><tbody><tr><td>2,048（GPT-3 原本的长度）</td><td>约 3,480 亿</td><td>约 97 亿（占不到 3%）</td></tr><tr><td>131,072（128K）</td><td>约 3,480 亿</td><td>约 6,185 亿（反超）</td></tr></tbody></table></div>
+<p>（线性层 96 × 24 × 12288² ≈ 3,480 亿；注意力 4 × 96 × L × 12288。）</p>
+<p>所以 GPT-3 那篇里"FFN 贡献主要计算量"这个结论，只在 GPT-3 当年 2K 上下文时成立。Agent 动辄十几万 token 的上下文里，注意力会变成主要开销之一；GQA/MLA 省的是 KV 缓存的<strong>存储和读取</strong>，并不减少这部分点积次数。</p>
+<blockquote><p>[补充说明] 现代模型的 d 和 GPT-3 不同，交叉点也不同（Llama 3.1 405B 的 d = 16,384，交叉点约 9.8 万；用了 GQA 后 K/V 投影变小，线性层部分也略小于 24d²），这里只用 GPT-3 维度演示量级。</p></blockquote>
+<h3>5.2 不只是贵，还会变差：上下文工程</h3>
+<p>Anthropic 的工程文章把这个问题称为"注意力预算有限"：上下文里的 token 越多，模型对每一部分的关注越分散，正式名字叫 <strong>context rot（上下文腐化）</strong>。由此出现了一整套管理上下文的做法，统称 <strong>context engineering（上下文工程）</strong>，主要有三种：</p>
+<ol><li><strong>压缩（compaction）</strong>：快接近上下文上限时，让模型把已有对话总结成一段摘要，用摘要开一个新的上下文继续干。Claude Code 到上限时就会自动做这件事。</li><li><strong>记笔记（structured note-taking）</strong>：Agent 把进展、待办写到外部文件里，需要时再读回来，不占用上下文。</li><li><strong>子 Agent（sub-agent）</strong>：把一块子任务交给另一个独立上下文的模型去做，它可能读了几万 token，但只把几百 token 的结论交回主 Agent。</li></ol>
+<p>从计算角度看，这三种做法的本质都一样：<strong>控制每次 prefill 的长度和 KV 缓存的大小</strong>。注意它们和前缀缓存有冲突：压缩会改写前面的内容，缓存会因此全部失效，下一轮需要重新 prefill。</p>
+<hr>
+<h2 id="s7">6. "Graph"到底指什么</h2>
+<h3>6.1 两类系统</h3>
+<p>Anthropic 在《Building effective agents》里的区分：</p>
+<ul><li><strong>Workflow</strong>：LLM 和工具通过<strong>预先写好的代码路径</strong>编排。比如"先让模型分类 → 按类别走不同分支 → 生成 → 另一个模型评审 → 不合格就重写"。适合流程固定、可预测的任务。</li><li><strong>Agent</strong>：LLM <strong>自己动态决定</strong>流程和工具使用。适合需要灵活性、步骤数事先不知道的任务。</li></ul>
+<p>文章的核心建议是：最成功的实现大多不是靠复杂框架，而是简单、可组合的模式；能用简单方法就不要上复杂结构。</p>
+<h3>6.2 LangGraph 这类"图"框架在做什么</h3>
+<p>它把程序表示成一张图：</p>
+<ul><li><strong>节点</strong>：一个普通函数，里面可以调 LLM，也可以就是一段普通代码（比如跑测试）</li><li><strong>边</strong>：决定下一步执行哪个节点；固定边总是 A → B，条件边根据当前状态决定走哪里</li><li><strong>状态</strong>：所有节点共享读写的一份数据（通常就是消息列表）</li><li><strong>检查点（checkpointer）</strong>：每一步把状态存下来，可以暂停、恢复、回退到某一步</li></ul>
+<p>一个最小的 agent 在 LangGraph 里就是两个节点（"调模型"和"执行工具"）加一条条件边（"有工具调用就去执行，没有就结束"），画出来是一个环。也就是说，<strong>"图"是一种写程序的方式，最简单的 agent 在图里也只是一个环，和第 3 节的 while 循环等价</strong>。</p>
+<h3>6.3 "Graph 用确定性验证兜底"这句话该怎么理解</h3>
+<p>验证确实是 Agent 能力的关键来源，但它通常以<strong>工具</strong>的形式出现：</p>
+<ul><li>编程 Agent：跑测试、跑编译、跑 linter，把输出作为工具结果写回上下文</li><li>Claude Code 文档把它的循环描述为三个阶段：收集上下文 → 采取行动 → 验证结果，循环直到完成</li></ul>
+<p>区别在于<strong>谁决定要不要验证、验证失败后怎么办</strong>：workflow 里是工程师写死的条件边；agent 里是模型读到报错后自己决定。"状态回退"在有检查点的框架里确实存在，但更常见的情况是模型在后面追加修正，而不是把历史倒回去。</p>
+<hr>
+<h2 id="s8">7. 训练侧：Loop 里试出来的东西怎么"内化"进权重</h2>
+<p>常见的描述是三步：离线跑 Loop → 把轨迹回流训练 → 能力内化进权重。方向是对的，这里补上公开的具体做法。</p>
+<h3>7.1 强化学习的基本形状（以 DeepSeek-R1 为例）</h3>
+<p><strong>大白话版</strong>：同一道题让模型做很多遍，用程序自动判对错；做对的那几遍，把它们用过的写法概率调高；做错的调低。</p>
+<p>具体做法：</p>
+<ol><li>一道题让当前模型生成 G 个回答（一组）。</li><li>每个回答用<strong>规则</strong>打分：数学题看最终答案是否和标准答案一致（要求答案写在指定格式里方便程序比对）；编程题用编译器跑预设的测试用例。另有一个格式分，检查思考过程是否放在规定的标记之间。这种"程序能自动判对错"的奖励，正式名字叫 <strong>verifiable rewards（可验证奖励）</strong>，对应的训练方法统称 <strong>RLVR</strong>。</li><li>每个回答的"优势"= （它的分数 − 这组的平均分）÷ 这组分数的标准差。比平均好就是正，比平均差就是负。</li><li>按优势调整权重：让优势为正的回答里每个 token 的概率变大，为负的变小。这个算法叫 <strong>GRPO（Group Relative Policy Optimization）</strong>，它的特点是用"同组平均分"当基准，省掉了 PPO 里另一个用来估计基准的大模型。</li></ol>
+<p>DeepSeek-R1-Zero 刻意没用神经网络打分器，原因是论文发现大规模强化学习中神经网络打分器容易被"钻空子"（reward hacking）。</p>
+<h3>7.2 扩展到 Agent：多轮、带工具的强化学习</h3>
+<p>2025—2026 年的公开工作把上面的做法从"一问一答"推广到"多轮带工具"：</p>
+<ul><li>一次"尝试"（正式名字叫 <strong>rollout</strong>）不再是一段回答，而是一整段 Agent 轨迹：模型生成 → 工具执行 → 结果写回 → 模型再生成……</li><li>工具在<strong>隔离的沙盒</strong>里执行（每次尝试一个独立环境，跑完销毁）。</li><li>以软件工程任务为例：给一个代码仓库的某个版本 + 一个 issue，Agent 在沙盒里改代码；结束后把改动打成补丁，放到另一个干净的沙盒里跑测试，测试结果就是奖励，再用 GRPO 更新。</li><li>训练产物是<strong>token 序列</strong>本身：模型生成的 token 参与梯度计算，工具返回的 token 只作为上下文（具体如何屏蔽各框架做法不一，这里不细展开）。</li></ul>
+<p>所以对"每一层的输出作为蒸馏结果去训练下一层"这种直觉，更贴切的说法是：<strong>Loop + 验证器产生"哪条路走得通"的信号，这个信号在离线训练时被用来更新同一个模型的全部权重</strong>，下一个版本的模型在同样的 Loop 里会更少走弯路。没有哪一步是在训练"下一层"。</p>
+<hr>
+<h2 id="s9">8. 修正后的完整对照表</h2>
+<div class="table-wrap"><table><thead><tr><th>维度</th><th>GPT-3 一次前向传播</th><th>现代 Agent 一次任务</th></tr></thead><tbody><tr><td>基本计算单元</td><td>1 个 token 穿过 96 层</td><td>仍然是 1 个 token 穿过全部层（深度固定），只是 token 多得多</td></tr><tr><td>FFN</td><td>1 个大 FFN，全部参数参与</td><td>开源前沿模型多为 MoE：每 token 只激活一部分专家</td></tr><tr><td>层间传递</td><td>12,288 维连续向量</td><td>层间不变；<strong>轮与轮之间</strong>传递的是 token（文本、JSON、工具结果）</td></tr><tr><td>"下一步"由谁算</td><td>第 i+1 层的另一组权重</td><td>同一个模型，上下文多了一截</td></tr><tr><td>记住前文的方式</td><td>训练时序列内全算</td><td>推理时靠 KV 缓存；跨轮靠前缀缓存</td></tr><tr><td>主要瓶颈</td><td>训练：算力</td><td>读入（prefill）：算力；逐字生成（decode）：显存带宽；长上下文：注意力计算 + KV 缓存容量</td></tr><tr><td>外部验证</td><td>无</td><td>以工具形式出现（测试、编译器、搜索），由模型或预设流程决定何时调用</td></tr><tr><td>控制流</td><td>固定</td><td>agent：模型决定（一个 while 循环）；workflow：工程师写死（图）</td></tr><tr><td>权重是否改变</td><td>训练时改，推理时不改</td><td>运行时不改；离线用轨迹 + 可验证奖励做强化学习或蒸馏</td></tr><tr><td>上下文上限</td><td>2,048 token</td><td>公开模型 128K 起；靠压缩、笔记、子 Agent 管理</td></tr></tbody></table></div>
+<hr>
+<h2 id="s10">9. 不确定或没有公开的部分</h2>
+<ul><li>Claude、GPT 系列等闭源模型的层数、维度、是否 MoE、K/V 存储方式、聊天模板的具体 token 格式：<strong>均未公开</strong>。</li><li>服务商内部的前缀缓存实现（块大小、存在显存还是 SSD、跨机器怎么共享）：只有价格和行为是公开的，实现细节未公开。</li><li>第 4.2 节的 30 轮算例使用的是假设参数，用来演示数量级，不是某个产品的实测数据。</li><li>第 5.1 节的交叉点用的是 GPT-3 维度和"全稠密注意力"口径，和 GPT-3 那篇第四节一样是偏高的上界（GPT-3 部分层是带状稀疏注意力）。</li></ul>
+<hr>
+<h2 id="s11">来源</h2>
+<ul><li>本站：<a href="gpt3.html">GPT-3 计算规模、信息流与能耗</a></li><li>Anthropic，Building effective agents：<a href="https://www.anthropic.com/research/building-effective-agents">https://www.anthropic.com/research/building-effective-agents</a></li><li>Anthropic，Effective context engineering for AI agents：<a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents</a></li><li>Claude 文档，How tool use works：<a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works">https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works</a></li><li>Claude 文档，Thinking in tool and multi-turn workflows：<a href="https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows">https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows</a></li><li>Claude 文档，Prompt caching / Pricing：<a href="https://platform.claude.com/docs/en/about-claude/pricing">https://platform.claude.com/docs/en/about-claude/pricing</a></li><li>Claude Code 文档，How Claude Code works：<a href="https://code.claude.com/docs/en/how-claude-code-works">https://code.claude.com/docs/en/how-claude-code-works</a></li><li>DeepSeek-V3 Technical Report：<a href="https://arxiv.org/abs/2412.19437">https://arxiv.org/abs/2412.19437</a> ；配置文件：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json">https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json</a></li><li>DeepSeek-R1 论文：<a href="https://arxiv.org/abs/2501.12948">https://arxiv.org/abs/2501.12948</a></li><li>Llama 3 论文：<a href="https://arxiv.org/abs/2407.21783">https://arxiv.org/abs/2407.21783</a> ；405B 配置（Hugging Face 上的 config.json）</li><li>vLLM，Automatic Prefix Caching：<a href="https://docs.vllm.ai/en/v0.8.5/design/automatic_prefix_caching.html">https://docs.vllm.ai/en/v0.8.5/design/automatic_prefix_caching.html</a></li><li>LangGraph Graph API：<a href="https://docs.langchain.com/oss/python/langgraph/graph-api">https://docs.langchain.com/oss/python/langgraph/graph-api</a></li><li>多轮 Agent 强化学习基础设施：ProRL Agent（arXiv 2603.18815）；Sandman（arXiv 2610.39711）</li><li>prefill/decode 与算术强度分界点：dev.to《Why LLM decoding is memory-bound》；arXiv 2511.07422</li></ul>
+<hr>
+<p><a href="agent-compute-2.html">下一篇：前沿 Agent 计算过程补全（二）——本站前几篇没有触及的部分 &rarr;</a></p>
+<p class="subtitle" style="margin-top:2rem">iEnjoy &middot; GPU &amp; LLM Learning Notes</p>
+</div>
+</body>
+</html>

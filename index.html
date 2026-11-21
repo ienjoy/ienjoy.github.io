@@ -125,6 +125,11 @@
   .prob:hover,
   .prob:focus-visible { border-color: var(--yellow); }
 
+  .agent .tag { color: #fb923c; }
+  .agent .open { color: #fb923c; }
+  .agent:hover,
+  .agent:focus-visible { border-color: #fb923c; }
+
   footer {
     margin-top: 2.5rem;
     color: var(--muted);
@@ -178,6 +183,19 @@
       <span class="tag">概率论 · 附可复现实验</span>
       <h2>LLM 白话：概率论在大模型里到底起什么作用</h2>
       <p>从 Embedding、前向与反向传播讲起，最后落到一个尖锐的问题——凭什么说 softmax 吐出的那 5 万个数是「概率」，而不是别的什么？内含链式法则的逐步数值拆解、马尔可夫假设的对照、四条可证伪的证据，以及两个能在自己电脑上跑通的实验：校准曲线，和用一台自造的「说话机器」检验网络到底有没有学到真实概率。</p>
+      <span class="open">阅读文章 →</span>
+    </a>
+    <a class="card agent" href="agent-compute-1.html" style="grid-column: 1 / -1;">
+      <span class="tag">Agent · 计算过程 · 一</span>
+      <h2>从 GPT-3 的一次前向传播，到 Agent 的一次完整任务</h2>
+      <p>接着 GPT-3 那篇往下走：现代模型的前向传播改了什么（GQA、MLA 压缩 KV、MoE 专家混合），推理时的 prefill / decode 与 KV 缓存，Agent Loop 在 token 层面到底发生了什么，前缀缓存为什么让 30 轮对话只需重算 5%，上下文多长时注意力反超 FFN，"Graph"到底指什么，以及 Loop 里试出来的能力如何靠强化学习内化进权重。</p>
+      <span class="open">阅读文章 →</span>
+    </a>
+
+    <a class="card agent" href="agent-compute-2.html" style="grid-column: 1 / -1;">
+      <span class="tag">Agent · 推理系统 · 二</span>
+      <h2>前沿 Agent 计算过程补全（二）：本站前几篇没有触及的部分</h2>
+      <p>前面五篇讲的是"一层怎么算、一个 token 怎么出来"。这一篇讲那套前向传播在 2026 年的前沿 Agent 里被放进了怎样的"工厂"：一张 80GB 卡能同时服务几个 Agent（以及为什么瓶颈从读权重变成读 KV 缓存）、DeepSeek-V3 在 320 张卡上的专家并行、稀疏注意力与线性注意力混合两条长上下文路线、投机解码、保证工具调用合法的受约束采样、多 Agent 的 token 倍数，以及 Agent 强化学习里算力到底花在哪。</p>
       <span class="open">阅读文章 →</span>
     </a>
   </section>

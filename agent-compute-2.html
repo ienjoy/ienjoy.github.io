@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="从 Embedding 到概率论：LLM 计算过程的白话拆解，附两个可动手复现的实验">
+<title>前沿 Agent 计算过程补全（二）</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body, {
+    delimiters: [
+      {left: '$$', right: '$$', display: true},
+      {left: '$', right: '$', display: false}
+    ],
+    ignoredTags: ['script','noscript','style','textarea','pre','code'],
+    throwOnError: false
+  });"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e2e4ed;
+    --muted: #8b8fa8;
+    --accent: #5b8af0;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --code-bg: #12151f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', 'Noto Serif SC', serif;
+    font-size: 16px;
+    line-height: 1.8;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 860px; margin: 0 auto; }
+  .back-link {
+    display: inline-block;
+    margin-bottom: 1.4rem;
+    color: var(--muted);
+    text-decoration: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.9rem;
+  }
+  .back-link:hover { color: var(--accent); }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.6rem;
+    margin: 2.6rem 0 0.4rem;
+    line-height: 1.3;
+  }
+  h1:first-of-type { margin-top: 0; }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 2.4rem 0 0.8rem;
+    padding-left: 0.8rem;
+    border-left: 3px solid var(--accent);
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 1.8rem 0 0.6rem;
+  }
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--yellow);
+    margin: 1.4rem 0 0.4rem;
+  }
+  p { margin: 0.7rem 0; }
+  blockquote {
+    border-left: 3px solid var(--green);
+    background: #0d1f17;
+    color: var(--green);
+    padding: 0.8rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 6px 6px 0;
+  }
+  blockquote p { margin: 0.3rem 0; color: var(--green); }
+  blockquote strong { color: #6ee7b7; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  .table-wrap { overflow-x: auto; }
+  th {
+    background: var(--surface);
+    color: var(--accent);
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 600;
+  }
+  td {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  tr:nth-child(even) td { background: #13161f; }
+  code {
+    background: var(--code-bg);
+    color: #7dd3fc;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.1rem 1.3rem;
+    overflow-x: auto;
+    margin: 1.1rem 0;
+  }
+  pre code {
+    background: none;
+    color: #94a3b8;
+    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    white-space: pre;
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  ul, ol { padding-left: 1.6rem; margin: 0.6rem 0; }
+  li { margin: 0.3rem 0; }
+  strong { color: #fff; }
+  em { color: var(--muted); font-style: italic; }
+  .container a:not(.back-link):not([class^="lv"]) { color: var(--accent); word-break: break-all; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.4rem 0; }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+    font-style: italic;
+  }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.4rem;
+    margin: 1.5rem 0 2.5rem;
+    font-size: 0.93rem;
+    max-height: 460px;
+    overflow-y: auto;
+  }
+  .toc-title {
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .toc a { color: var(--muted); text-decoration: none; display: block; padding: 0.15rem 0; }
+  .toc a:hover { color: var(--text); }
+  .toc a.lv1 { color: var(--text); font-weight: 600; margin-top: 0.5rem; }
+  .toc a.lv2 { padding-left: 1.2rem; font-size: 0.88rem; }
+  @media (max-width: 680px) {
+    body { padding: 1rem 0.6rem; font-size: 15px; }
+    table { font-size: 0.84rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+<nav aria-label="站点导航"><a class="back-link" href="index.html">&larr; 返回文章首页</a></nav>
+
+<h1 style="margin-top:0">前沿 Agent 计算过程补全（二）</h1>
+<p class="subtitle">本站前几篇没有触及的部分：那套前向传播，在 2026 年的前沿 Agent 里被放进了一个什么样的“工厂”里运行——单卡能服务几个 Agent、MoE 在几百张卡上怎么切、稀疏与线性注意力、投机解码、受约束采样、多 Agent 的 token 账，以及 Agent 强化学习的算力去向。</p>
+<div class="toc">
+<div class="toc-title">目录</div>
+<a class="lv2" href="#s1">0. 这份文档补的是哪一块</a>
+<a class="lv2" href="#s2">1. 一个 Agent 请求在服务端的完整路径</a>
+<a class="lv2" href="#s3">2. 单卡视角：一张 80GB 显卡能同时服务几个 Agent</a>
+<a class="lv2" href="#s4">3. 大模型在几百张卡上怎么切：以 DeepSeek-V3 的公开部署为例</a>
+<a class="lv2" href="#s5">4. 长上下文注意力的两条新路线</a>
+<a class="lv2" href="#s6">5. 让逐字生成变快：投机解码</a>
+<a class="lv2" href="#s7">6. 采样这一步多了什么：保证工具调用格式合法</a>
+<a class="lv2" href="#s8">7. Agent 一次任务的总账：多 Agent 和工具定义</a>
+<a class="lv2" href="#s9">8. 训练侧：Agent 强化学习的算力花在哪里</a>
+<a class="lv2" href="#s10">9. 把三份材料合起来：一次前沿 Agent 任务的完整计算栈</a>
+<a class="lv2" href="#s11">10. 不确定或没有公开的部分</a>
+<a class="lv2" href="#s12">来源</a>
+</div>
+<blockquote><p>整理日期：2026-11-21<br>前置阅读：本站 GPT-3、LLaMA-3 等五篇架构文章，以及上一篇<a href="agent-compute-1.html">《从 GPT-3 的一次前向传播，到 Agent 的一次完整任务（一）》</a>（下文简称"上篇"）<br>写法约定同上：先用大白话说完，再点正式名字；数字给推导或来源，能算的都用代码复算过；闭源模型的内部细节没有公开，一律用开源模型的公开配置演示。</p></blockquote>
+<hr>
+<h2 id="s1">0. 这份文档补的是哪一块</h2>
+<div class="table-wrap"><table><thead><tr><th>层面</th><th>本站前五篇已经讲到</th><th><a href="agent-compute-1.html">上篇</a>已经讲到</th><th><strong>本篇新增</strong></th></tr></thead><tbody><tr><td>单个模型的一层怎么算</td><td>GPT-3 稠密 MHA；LLaMA-3 的 GQA、RoPE、SwiGLU、RMSNorm</td><td>MoE（DeepSeek-V3）、MLA 压缩 KV</td><td>长上下文注意力的两条新路线：<strong>稀疏注意力</strong>、<strong>线性注意力混合</strong></td></tr><tr><td>单个请求怎么推理</td><td>KV 缓存；prefill 与 decode 的 FLOPs（8K 上下文，单请求）</td><td>prefill/decode 的瓶颈差异</td><td><strong>投机解码</strong>（一次确认多个 token）；<strong>受约束采样</strong>（保证工具调用格式合法）</td></tr><tr><td>很多请求一起怎么跑</td><td>无</td><td>只提了名字（连续批处理、PD 分离）</td><td><strong>单卡能同时服务几个 Agent</strong>；<strong>MoE 在几百张卡上的切分</strong>；<strong>KV 缓存存储层</strong>成为新瓶颈</td></tr><tr><td>Agent 一次任务的总账</td><td>无</td><td>30 轮单 Agent 的 token 账、前缀缓存</td><td><strong>多 Agent 的 token 倍数</strong>；<strong>工具定义本身的 token 开销</strong></td></tr><tr><td>训练</td><td>预训练 6NT、能耗换算、反向传播</td><td>RLVR / GRPO 的形状</td><td><strong>Agent 强化学习里算力花在哪</strong>：生成占大头、长尾、异步</td></tr></tbody></table></div>
+<p>一句话概括本篇要回答的问题：<strong>GPT-3、LLaMA-3 那几篇里的那套前向传播，在 2026 年的前沿 Agent 里，被放进了一个什么样的"工厂"里运行。</strong></p>
+<hr>
+<h2 id="s2">1. 一个 Agent 请求在服务端的完整路径</h2>
+<p>上篇从程序（harness）的角度讲了工具循环。这一节换到服务端，看一次请求在机房里经过了哪些环节。以下综合 DeepSeek 公开的部署方案和 2026 年的 Agent 推理系统论文；闭源厂商的实际实现未公开，但公开论文里的架构大体一致。</p>
+<pre><code>① 请求到达 → 路由器：尽量把同一个对话分给"手里有它旧缓存"的机器
+② 读旧 KV 缓存：从显存 / 内存 / 分布式存储里把前几轮的 K、V 取出来
+③ prefill 机器：只计算这一轮新增的 token（工具结果、用户新消息）
+④ 把完整 KV 缓存经高速网络传给 decode 机器
+⑤ decode 机器：和成百上千个别人的请求拼成一批，逐 token 生成
+      └─ 每步：可能用投机解码一次出 2 个 token；采样前用语法掩码保证工具调用 JSON 合法
+⑥ 生成到"工具调用结束"标记 → 停止 → 返回给你的程序
+⑦ 这一轮的 KV 缓存写回存储，等你下一轮请求来时复用
+⑧ 你的程序执行工具（这段时间服务端不为你计算）→ 回到 ①</code></pre>
+<p>其中第 ③、④ 步把"读入"和"生成"放在不同机器上，正式名字叫 <strong>PD 分离</strong>（prefill-decode disaggregation）。第 ② 步和第 ⑦ 步是 Agent 特有的负担，下面第 3.3 节会讲到，这里在 2026 年已经变成了主要瓶颈之一。</p>
+<hr>
+<h2 id="s3">2. 单卡视角：一张 80GB 显卡能同时服务几个 Agent</h2>
+<p>本站 LLaMA-3 8B 那篇算过"已有 8K 缓存后再生成 1 个 token 约 19.3 GFLOPs"。这是<strong>一个请求</strong>的账。服务商关心的是<strong>一张卡同时跑多少个请求</strong>，Agent 场景下的答案和直觉很不一样。</p>
+<h3>2.1 算法（沿用 LLaMA-3 8B 那篇的参数）</h3>
+<ul><li>权重：8.03B 参数 × 2 字节 = <strong>16.06 GB</strong></li><li>每 token 的 KV 缓存：LLaMA-3 8B 那篇算过是 128 KiB = 131,072 字节</li><li>一张 80GB 卡扣掉权重后剩约 <strong>63.9 GB</strong>（忽略激活和框架开销，所以这是上限）</li><li>能放下的 token 总数：63.9 GB ÷ 131,072 字节 ≈ <strong>48.8 万个 token</strong></li></ul>
+<p>如果每个 Agent 对话已经累积到 65,000 token（上篇 30 轮算例的终点）：</p>
+<p>48.8 万 ÷ 6.5 万 ≈ <strong>7 个 Agent 对话</strong>。</p>
+<h3>2.2 这 7 个对话一起 decode，每一步要从显存搬多少数据</h3>
+<p>一批里每个请求生成 1 个 token，需要：</p>
+<ul><li>把全部权重读一遍：16.06 GB（7 个请求共享这一次读取）</li><li>把每个请求自己的 KV 缓存读一遍：7 × 65,000 × 131,072 字节 ≈ 59.6 GB</li></ul>
+<p>合计约 <strong>75.7 GB/步</strong>，其中 <strong>KV 缓存占 79%</strong>。</p>
+<p>按 H100 SXM 规格表上的显存带宽 3.35 TB/s 算（理想化，假设带宽全部跑满）：每步约 22.6 毫秒，每个对话每秒约 44 个 token，整张卡每秒约 310 个 token。</p>
+<h3>2.3 这说明了什么</h3>
+<p>LLaMA-3 8B 那篇说 decode 受显存带宽限制，这是对的，但隐含的画面是"主要在读<strong>权重</strong>"。在 Agent 场景里，上下文很长，<strong>主要在读的是 KV 缓存</strong>。这带来两个直接后果：</p>
+<ol><li>把很多请求拼成一批，只能摊薄权重的读取，摊不薄 KV 的读取（每个请求的 KV 是它自己的）。所以对长上下文 Agent，批处理带来的收益有限。</li><li>上篇讲的 GQA、MLA 压缩 KV，在这里直接决定了一张卡能服务几个 Agent、每个 Agent 有多快。这也是第 4 节那些新注意力结构出现的根本动机。</li></ol>
+<hr>
+<h2 id="s4">3. 大模型在几百张卡上怎么切：以 DeepSeek-V3 的公开部署为例</h2>
+<p>上篇讲了 MoE 的结构：每个 token 只用 256 个专家里的 8 个。这一节讲这个结构在真实机房里怎么跑，DeepSeek-V3 技术报告第 3.4 节公开了数字。</p>
+<h3>3.1 一个 token 在 decode 集群里走一遍</h3>
+<p><strong>大白话版</strong>：每张卡只放一个专家。一个 token 在自己所在的卡上算完注意力后，打分器选出它要用的 8 个专家，然后把这个 token 的向量通过网络<strong>发</strong>到那 8 张卡上，各自算完再<strong>收</strong>回来、按权重加起来，送进下一层。下一层再来一遍。</p>
+<p>正式名字：把专家分散在不同卡上叫 <strong>expert parallelism（专家并行）</strong>；"发出去、收回来"这一对通信叫 <strong>dispatch / combine</strong>，底层是一种所有卡互相收发的通信，叫 <strong>all-to-all</strong>。</p>
+<p>DeepSeek-V3 公开的部署规模：</p>
+<div class="table-wrap"><table><thead><tr><th>阶段</th><th>最小部署单元</th><th>注意力部分</th><th>MoE 部分</th></tr></thead><tbody><tr><td>prefill（读入）</td><td>4 台机器，32 张 GPU</td><td>4 路张量并行 × 8 路数据并行</td><td>32 路专家并行；每卡 8 个专家 + 1 个冗余专家</td></tr><tr><td>decode（生成）</td><td>40 台机器，320 张 GPU</td><td>4 路张量并行 × 80 路数据并行</td><td>320 路专家并行；<strong>每卡 1 个专家</strong>，另有 64 张卡放冗余专家和共享专家</td></tr></tbody></table></div>
+<p>几个细节：</p>
+<ul><li><strong>每个 token 最多只发往 4 台机器</strong>（论文 4.2 节，节点上限 M = 4），用来限制跨机器的网络流量。</li><li><strong>冗余专家</strong>：有些专家特别热门，被选得多，所在的卡就会排队。解决办法是把热门专家多复制几份放到别的卡上分流。</li><li><strong>两批交错</strong>：把一批请求切成两个小批，一个小批在算注意力和专家时，另一个小批在做网络收发，让计算和通信互相掩盖。</li></ul>
+<h3>3.2 为什么 decode 要用 320 张卡，而 prefill 只要 32 张</h3>
+<p>回到第 2 节的结论：decode 每一步每个请求只有 1 个 token，计算量很小，瓶颈在搬数据。卡分得越多，每张卡上的专家越少，每个专家一次能收到更多 token（来自整个集群的几百上千个请求），矩阵乘法才"吃得饱"。prefill 本身就有成千上万个 token，不需要这样拆。</p>
+<h3>3.3 Agent 带来的新瓶颈：存取 KV 缓存的网络带宽</h3>
+<p>DeepSeek 和北大、清华在 2026 年 2 月的论文（DualPath）专门分析了 Agent 负载。核心观察：</p>
+<ul><li>Agent 是"多轮、每轮只追加一小段"的模式，所以 KV 缓存命中率通常 <strong>≥95%</strong>。上篇 30 轮算例算出来的 95% 和这个实测量级吻合。</li><li>命中率高意味着 prefill 机器几乎不用算，但它必须先从外部存储里<strong>读回</strong>海量的旧 KV 缓存。结果是 prefill 机器的存储网卡被打满，decode 机器的网卡却闲着，<strong>整个系统被存储读取卡住，而不是被计算卡住</strong>。</li><li>他们的解决办法是让 decode 机器也去读存储，再通过机器间的高速网络转给 prefill 机器，离线吞吐提高到最多 1.87 倍。</li></ul>
+<p>所以对 Agent 来说，GPT-3 那篇第五节那条"FLOPs → 电能"的链条只覆盖了一部分开销。前沿 Agent 推理的成本里，越来越大的一块是<strong>数据搬运</strong>：显存里搬 KV（第 2 节）、机器之间传 KV、存储读写 KV。</p>
+<hr>
+<h2 id="s5">4. 长上下文注意力的两条新路线</h2>
+<h3>4.1 先算一笔账：长上下文下注意力有多贵</h3>
+<p>上篇用 GPT-3 维度推过：注意力计算量在上下文达到 6d（73,728 token）时追上线性层。换成 DeepSeek-V3 这种 MoE 模型，情况更极端，因为 MoE 把线性层的计算量压得很小（每 token 只有 2 × 37B = 740 亿次），注意力却没有变小。</p>
+<p>DeepSeek-V3 每生成 1 个 token，注意力部分的计算量（按每个头 Q·K 用 192 维、α·V 用 128 维的标准视角）：</p>
+<p>每层每个上下文 token：2 × 128 头 × (192 + 128) = 81,920 次 61 层合计：约 500 万次 × 上下文长度 L</p>
+<div class="table-wrap"><table><thead><tr><th>上下文长度 L</th><th>注意力（每 token）</th><th>线性层 + 专家（每 token）</th><th>注意力 ÷ 线性</th></tr></thead><tbody><tr><td>8,192</td><td>约 410 亿</td><td>约 740 亿</td><td>0.55</td></tr><tr><td>14,800</td><td>约 740 亿</td><td>约 740 亿</td><td><strong>1（交叉点）</strong></td></tr><tr><td>131,072（128K）</td><td>约 6,550 亿</td><td>约 740 亿</td><td><strong>8.9</strong></td></tr></tbody></table></div>
+<blockquote><p>[补充说明] MLA 在 decode 时常用一种"吸收"写法，直接在 512 维压缩空间里算注意力，省显存但计算量更大，按这种写法交叉点会提前到约 4,400 token。不同推理引擎的实现不同，上表取的是较乐观的口径。</p></blockquote>
+<p>结论：<strong>对 MoE 模型来说，Agent 动辄几万到十几万 token 的上下文里，注意力是每个 token 的主要计算开销</strong>，FFN 已经不是了。这正好把 GPT-3 那篇"FFN 贡献主要计算量"的结论翻转了过来。</p>
+<h3>4.2 路线一：稀疏注意力——只看最相关的 2,048 个 token（DeepSeek-V3.2）</h3>
+<p><strong>大白话版</strong>：与其让每个新 token 都和前面 13 万个 token 逐一做完整的注意力，不如先用一个很便宜的小打分器把 13 万个 token 粗筛一遍，挑出最相关的 2,048 个，只和这 2,048 个做完整的注意力。</p>
+<p>正式名字叫 <strong>DSA（DeepSeek Sparse Attention）</strong>，由两部分组成：</p>
+<ul><li><strong>lightning indexer（闪电索引器）</strong>：一个小型注意力，只有 64 个头、每头 128 维（公开配置 <code>index_n_heads: 64</code>、<code>index_head_dim: 128</code>），用 ReLU 代替 softmax，用 8 位浮点（FP8）计算。它给每个历史 token 打一个"相关度分数"。</li><li><strong>top-k 选择</strong>：按分数取前 2,048 个（配置 <code>index_topk: 2048</code>），主注意力只在这些 token 上算。</li></ul>
+<p>DeepSeek-V3.2 相对上一版唯一的架构改动就是加了 DSA，靠继续训练接上去。</p>
+<p>账怎么变（128K 上下文，每生成 1 个 token，61 层合计）：</p>
+<div class="table-wrap"><table><thead><tr><th>部分</th><th>计算</th><th>结果</th></tr></thead><tbody><tr><td>原来的主注意力</td><td>500 万 × 131,072</td><td>约 6,550 亿次（16 位）</td></tr><tr><td>稀疏后的主注意力</td><td>500 万 × 2,048</td><td>约 102 亿次（16 位）</td></tr><tr><td>索引器</td><td>2 × 64 × 128 × 131,072 × 61</td><td>约 1,310 亿次（<strong>8 位</strong>）</td></tr></tbody></table></div>
+<p>需要说清楚的一点：<strong>索引器仍然要扫一遍全部历史 token，所以每个 token 的计算量仍然随上下文长度线性增长</strong>，理论复杂度并没有消失。它的作用是把这笔"必须看全部"的开销，从 128 个头的 16 位完整注意力，挪到 64 个头的 8 位简化打分上。另外它还要多存一份自己用的 K 缓存，每 token 每层 128 维、8 位，61 层约 7.8 KB/token（不含缩放因子等附加量）。</p>
+<p>公开评测：处理 7,000 token 以上的输入时速度提高到 2–3 倍，多数基准上的效果和上一版相当。</p>
+<h3>4.3 路线二：线性注意力混合——让大部分层的"记忆"大小固定（Qwen3-Next）</h3>
+<p><strong>大白话版</strong>：普通注意力的"记忆"就是 KV 缓存，每多一个 token 就多存一份，上下文越长存得越多。另一种思路是给每个头一块<strong>固定大小的记事本</strong>（一个 d × d 的矩阵）：每读一个新 token，就用这个 token 的 k、v 去<strong>改写</strong>记事本；要查询时，用 q 去"读"记事本。不管读过 1 千还是 100 万个 token，记事本都一样大。</p>
+<p>正式名字叫 <strong>linear attention（线性注意力）</strong>，记事本叫 <strong>state（状态）</strong>。Qwen3-Next 用的是一种改进版，叫 <strong>Gated DeltaNet</strong>，它的更新规则是：</p>
+<p>S_t = α_t · (I − β_t · k_t k_tᵀ) · S_{t−1} + β_t · k_t v_tᵀ，输出 o_t = S_tᵀ q_t</p>
+<p>逐项用大白话读：</p>
+<ul><li>α_t（0 到 1 之间）：先把整本记事本<strong>淡化</strong>一点，相当于遗忘旧内容</li><li>(I − β_t k_t k_tᵀ)：把记事本里"和当前 k_t 方向有关"的旧内容<strong>擦掉</strong>一部分</li><li>β_t k_t v_tᵀ：在 k_t 这个"地址"上<strong>写入</strong>新的 v_t</li><li>β_t 控制擦写力度</li></ul>
+<p>"先擦再写"这一步来自一个老的学习规则（delta rule），作用是防止固定大小的记事本被反复叠加写成一团糊。</p>
+<p><strong>为什么不全用线性注意力</strong>：固定大小的记事本必然会丢信息，精确回忆远处某个细节的能力不如普通注意力。所以 Qwen3-Next 采取混合方案：48 层里 36 层用 Gated DeltaNet，12 层保留普通注意力（3:1）。阿里的实验结论是 3:1 混合的效果超过任何单一结构。</p>
+<p>用公开配置算显存（Gated DeltaNet 层：32 个 V 头、每头 128 维；普通注意力层：2 个 KV 头、每头 256 维）：</p>
+<div class="table-wrap"><table><thead><tr><th>部分</th><th>计算</th><th>大小</th></tr></thead><tbody><tr><td>36 层线性注意力的记事本（<strong>固定</strong>）</td><td>36 × 32 × 128 × 128 × 2 字节</td><td>37.7 MB，与上下文长度无关</td></tr><tr><td>12 层普通注意力的 KV（随长度增长）</td><td>12 × 2 头 × 256 × 2（K 和 V）× 2 字节</td><td>24 KiB/token</td></tr></tbody></table></div>
+<p>和 LLaMA-3 8B 那篇的数字对比（每 token 128 KiB）：</p>
+<div class="table-wrap"><table><thead><tr><th>上下文长度</th><th>LLaMA-3 8B（全普通注意力，GQA）</th><th>Qwen3-Next 80B-A3B（3:1 混合）</th></tr></thead><tbody><tr><td>8,192</td><td>1.07 GB</td><td>0.24 GB</td></tr><tr><td>65,000</td><td>8.5 GB</td><td>1.6 GB</td></tr><tr><td>262,144</td><td>34.4 GB</td><td>6.5 GB</td></tr></tbody></table></div>
+<p>再配上极稀疏的 MoE（512 个专家只激活 10 个 + 1 个共享专家，每 token 激活约 3B 参数），公开数据是上下文超过 32K 时吞吐提高 10 倍以上。</p>
+<h3>4.4 两条路线对照</h3>
+<div class="table-wrap"><table><thead><tr><th></th><th>稀疏注意力（DSA）</th><th>线性注意力混合（Gated DeltaNet）</th></tr></thead><tbody><tr><td>改的是什么</td><td><strong>少算</strong>：每次只和 2,048 个 token 做完整注意力</td><td><strong>少存</strong>：大部分层的记忆大小固定</td></tr><tr><td>KV 缓存</td><td>不变（甚至多一份索引器缓存）</td><td>只有 1/4 的层还有随长度增长的缓存</td></tr><tr><td>每 token 计算量随上下文</td><td>仍线性增长，但大头挪到便宜的 FP8 索引器</td><td>线性注意力层不随长度增长；普通注意力层仍增长</td></tr><tr><td>代价</td><td>选漏了相关 token 就看不到</td><td>固定大小记忆必然有损，靠保留的普通注意力层补</td></tr></tbody></table></div>
+<blockquote><p>[补充说明] 闭源前沿模型采用了哪种（或都没有采用），官方均未公开。这里只说明 2025–2026 年公开模型里出现了这两条主流路线。</p></blockquote>
+<hr>
+<h2 id="s6">5. 让逐字生成变快：投机解码</h2>
+<h3>5.1 原理</h3>
+<p>第 2 节说过，decode 时 GPU 大部分时间在等数据，计算单元很闲。投机解码的想法是利用这份闲置：</p>
+<ol><li>先用一个很便宜的办法<strong>猜</strong>接下来的几个 token（比如猜 1 个）。</li><li>把"当前 token + 猜的 token"一起送进大模型，做一次小规模的并行前向传播，相当于一个只有 2 个 token 的 prefill。因为是并行算，花的时间和只算 1 个 token 差不多，瓶颈仍是搬权重和 KV。</li><li>大模型这一次算出了两个位置各自的"真正的下一个词"分布。如果猜的那个 token 和大模型的结果一致（按一套保证输出分布不变的规则判定），就<strong>一步拿到 2 个 token</strong>；不一致，就丢掉猜的那个，至少还拿到 1 个正确的。</li></ol>
+<p>正式名字叫 <strong>speculative decoding（投机解码）</strong>，猜 token 的部件叫 <strong>draft（草稿）</strong>，大模型检查叫 <strong>verify（验证）</strong>。关键性质是：<strong>输出质量不变，只是变快</strong>。</p>
+<h3>5.2 DeepSeek-V3 的做法：模型自带一个"多猜一个"的小模块</h3>
+<p>DeepSeek-V3 训练时就额外加了一层轻量模块，学习预测"下下个 token"，正式名字叫 <strong>MTP（Multi-Token Prediction，多 token 预测）</strong>。推理时这个模块直接当草稿用。</p>
+<p>公开数据：第二个 token 的接受率在 <strong>85%–90%</strong> 之间，生成速度（每秒 token 数）提高到 <strong>1.8 倍</strong>。</p>
+<p>验算：每步期望拿到的 token 数 = 1 + 接受率 = 1.85～1.9。实测 1.8 倍略低于这个理论值，因为验证本身也有少量额外开销。</p>
+<h3>5.3 和 Agent 的关系</h3>
+<p>Agent 输出里有大量<strong>格式高度可预测</strong>的内容：工具调用的 JSON 框架、参数名、重复引用的文件路径和代码片段。这些地方草稿的命中率往往更高，投机解码对 Agent 特别有效。第 8 节会讲到，它甚至被用到了强化学习训练里。</p>
+<hr>
+<h2 id="s7">6. 采样这一步多了什么：保证工具调用格式合法</h2>
+<p>LLaMA-3 8B 那篇第十节讲了采样：logits → softmax → argmax / top-k / top-p。Agent 在这一步多了一个环节。</p>
+<h3>6.1 问题</h3>
+<p>工具调用必须是合法的 JSON，并且要符合工具定义的参数格式。模型偶尔会写错（漏一个引号、参数名拼错、类型不对），程序就解析不了。</p>
+<h3>6.2 做法</h3>
+<p><strong>大白话版</strong>：把"合法的 JSON 长什么样"写成一套语法规则，编译成一台状态机。每生成一个 token 前，先问状态机："在当前位置，词表里哪些 token 接上去之后还可能是合法的？"把所有不合法 token 的 logit 设成负无穷（softmax 后概率为 0），再正常采样。这样模型<strong>物理上无法</strong>写出不合法的格式。</p>
+<p>正式名字叫 <strong>constrained decoding（受约束解码）</strong> 或 <strong>guided decoding</strong>，开源实现里常用的引擎是 <strong>XGrammar</strong>。</p>
+<p>计算上的代价：每步要算一个和词表等长的掩码（LLaMA-3 是 128,256 个位置）。优化过的引擎会把大部分 token 的合法性预先算好缓存起来，只在运行时补算少量依赖上下文的部分，并且和 GPU 的前向计算重叠进行，所以对 JSON 这类语法的开销可以忽略。</p>
+<p><strong>只约束工具调用部分</strong>：Agent 的输出一般是"自由文本 + 工具调用"混在一起。推理引擎支持"遇到触发标记（比如工具调用开始的标记）之前不约束，进入调用之后才按参数格式约束"，叫 <strong>structural tag</strong>。</p>
+<p>Claude API 对应的功能是在工具定义里加 <code>strict: true</code>（strict tool use），文档说明这样可以完全消除无效的工具调用。Anthropic 内部如何实现没有公开。</p>
+<hr>
+<h2 id="s8">7. Agent 一次任务的总账：多 Agent 和工具定义</h2>
+<h3>7.1 Anthropic 公开的倍数</h3>
+<p>Anthropic 在介绍其多 Agent 研究系统时公开了几组数字：</p>
+<ul><li>单个 Agent 的 token 用量约是普通聊天的 <strong>4 倍</strong>；多 Agent 系统约是 <strong>15 倍</strong>。</li><li>在他们的评测里，<strong>token 用量一项就解释了 80% 的效果差异</strong>。他们的总结是：多 Agent 系统之所以有效，主要是因为它帮你花够了解决问题所需的 token。</li><li>结构是"主 Agent 规划 + 多个子 Agent 并行搜索"，每个子 Agent 有自己独立的上下文，最后只把浓缩后的结论交回主 Agent。以 Claude Opus 4 为主、Claude Sonnet 4 为子 Agent 的组合，在内部研究评测上比单个 Opus 4 高 90.2%。</li></ul>
+<p>从计算角度翻译一下：多 Agent 用<strong>更多的并行前向传播</strong>（多个上下文同时跑）换来了<strong>更大的有效上下文</strong>（每个子 Agent 都能读满自己的窗口），代价是总 token 数成倍增长。这和 GPT-3 那篇第五节"调用次数 × 单次能耗"的框架直接相关：Agent 化之后，"单次调用"的 token 数本身就放大了 4 到 15 倍。</p>
+<h3>7.2 工具定义本身就是一笔大开销</h3>
+<p>上篇的算例假设"系统提示 + 工具说明 2 万 token"。如果接了很多工具，这个数字会大得多：每个工具的名字、说明、参数格式都要写进上下文，每轮都要（从缓存）读一遍。</p>
+<p>Anthropic 2025 年 11 月的工程文章给出了一个实例：一个"从 Google Drive 读文档、写入 Salesforce"的任务，常规做法要 <strong>15 万 token</strong>；改成"让模型写一段代码去调用工具、只把精简后的结果放回上下文"之后，降到 <strong>2,000 token</strong>，减少 98.7%。原理有两个：</p>
+<ol><li>工具说明不再一次性全部放进上下文，模型需要时再去"查阅"某个工具的定义。</li><li>工具之间传递的大块中间数据留在代码执行环境里，不再经过模型的上下文。</li></ol>
+<p>从计算角度看，这相当于<strong>把一部分原本由模型 prefill 和注意力承担的工作，挪给了普通的确定性程序</strong>。这和上篇第 6.3 节讨论的"Graph 用低成本、高确定性的规则兜底"思路方向一致，只是实现方式是"模型写代码"，而不是预先画好的图。</p>
+<h3>7.3 一次 Agent 任务的成本公式</h3>
+<p>把上篇和本篇合起来，一次 Agent 任务的服务端开销可以写成：</p>
+<pre><code>总开销 ≈ Σ（每个 Agent）Σ（每一轮）[
+      新增 token 数 × prefill 单价            ← 计算密集
+    + 旧上下文 token 数 × 缓存读取单价        ← 数据搬运（显存/网络/存储）
+    + 生成 token 数 × decode 单价             ← 显存带宽受限，随上下文变长而变贵
+]</code></pre>
+<p>各种技术分别在压哪一项：</p>
+<div class="table-wrap"><table><thead><tr><th>技术</th><th>压哪一项</th><th>本系列出处</th></tr></thead><tbody><tr><td>前缀缓存</td><td>把"旧上下文"从 prefill 价降到缓存读取价</td><td>上篇第 4 节</td></tr><tr><td>GQA / MLA / 线性注意力混合</td><td>缓存读取和 decode 的数据量</td><td>上篇 1.3；本篇 4.3</td></tr><tr><td>稀疏注意力</td><td>长上下文下 decode 的计算量</td><td>本篇 4.2</td></tr><tr><td>MoE</td><td>每 token 的线性层计算量</td><td>上篇 1.4</td></tr><tr><td>投机解码</td><td>decode 的步数</td><td>本篇第 5 节</td></tr><tr><td>压缩、子 Agent、按需加载工具、代码执行</td><td>每一轮的上下文长度本身</td><td>上篇 5.2；本篇第 7 节</td></tr></tbody></table></div>
+<hr>
+<h2 id="s9">8. 训练侧：Agent 强化学习的算力花在哪里</h2>
+<p>本站 GPT-3 和 LLaMA-3 那两篇用 6NT 估算预训练算力，那是"一次前向 + 一次反向，所有 token 并行"的账。Agent 强化学习的账完全不同。</p>
+<h3>8.1 一步强化学习里有什么</h3>
+<pre><code>① 生成（rollout）：当前模型在沙盒里把每道题完整做一遍，可能几十轮工具调用
+     ↑ 这一步本质上就是推理：大量 decode、KV 缓存、工具执行等待
+② 打分：跑测试 / 比对答案，得到奖励
+③ 训练：对生成出来的 token 序列做一次前向 + 反向，按 GRPO 等算法更新权重
+④ 把新权重同步给负责生成的机器 → 回到 ①</code></pre>
+<h3>8.2 时间几乎都花在生成上</h3>
+<p>多篇 2025–2026 年的系统论文给出了实测比例：</p>
+<ul><li>生成阶段通常占总训练时间的 <strong>70% 以上</strong>；有工作报告最大回答长度 16K 时，数学模型占 91%、代码模型占 84%；也有工作给出的范围是 50%–80%。</li><li>原因是<strong>长尾</strong>：同一批题目里，大部分回答很快结束，少数特别长的回答会拖住整批，其余 GPU 只能空等。有测量显示长尾阶段能占到生成时间的近一半。而且训练越往后，模型的回答往往越来越长。</li></ul>
+<p>对 Agent 任务，长尾更严重：除了生成长度不一，还要等工具执行、沙盒启动，单道题的轨迹可能有几十轮。</p>
+<h3>8.3 应对办法</h3>
+<ul><li><strong>异步训练</strong>：生成和训练放在不同的机器上同时进行，不再互相等待。代价是训练用的数据可能来自"旧一两版的模型"，正式名字叫 <strong>off-policy</strong>，需要算法上做修正，否则收敛会受影响。所以也有很多团队仍然坚持同步训练。</li><li><strong>把长尾任务集中处理</strong>：把可能产生长回答的题目归到一起调度，或者把没做完的轨迹截断，留到下一轮接着做。</li><li><strong>在生成阶段用投机解码</strong>：第 5 节的技术被用来加速强化学习里的生成，甚至把长尾造成的空闲时间拿来生成草稿。</li><li><strong>沙盒服务化</strong>：每条轨迹一个独立沙盒，用完即毁；沙盒的创建和回收本身也成了需要专门优化的系统（例如 2026 年的 Sandman、ProRL Agent）。</li></ul>
+<h3>8.4 这对 GPT-3 那篇第五节的"能耗链条"意味着什么</h3>
+<p>预训练的算力主要是<strong>大矩阵乘法</strong>（计算密集，利用率可以较高）。Agent 强化学习的算力大头却是<strong>生成</strong>，也就是 decode：显存带宽受限、长尾空等、工具等待。所以"总 FLOPs ÷ 每瓦 FLOP/s"这条换算在这里会更严重地<strong>低估</strong>实际能耗。GPT-3 那篇已经解释过实际吞吐只有峰值约 20% 的问题，在 Agent 强化学习里这个比例很可能更低。目前没有找到公开的、针对 Agent 强化学习的端到端能耗实测，这里只能给出定性判断。</p>
+<hr>
+<h2 id="s10">9. 把三份材料合起来：一次前沿 Agent 任务的完整计算栈</h2>
+<p>从下往上：</p>
+<div class="table-wrap"><table><thead><tr><th>层</th><th>发生了什么</th><th>主要瓶颈</th><th>出处</th></tr></thead><tbody><tr><td>1. 一层的计算</td><td>归一化 → 注意力（GQA / MLA / 稀疏 / 线性）→ 残差 → FFN 或 MoE → 残差</td><td>短上下文：FFN/MoE；长上下文：注意力</td><td>本站 GPT-3、LLaMA-3；上篇 1；本篇 4</td></tr><tr><td>2. 一个 token</td><td>穿过全部层（深度固定）；采样前加语法掩码；可能一次投机出 2 个</td><td>decode 时的显存带宽</td><td>本站 LLaMA-3；本篇 5、6</td></tr><tr><td>3. 一次模型调用</td><td>prefill 新增部分 + 读旧 KV + decode 到停止标记</td><td>KV 缓存的显存容量和读取带宽</td><td>上篇 2；本篇 2</td></tr><tr><td>4. 多请求共用硬件</td><td>连续批处理；PD 分离；专家并行与 all-to-all</td><td>网络通信；专家负载均衡</td><td>本篇 1、3</td></tr><tr><td>5. 跨轮复用</td><td>前缀缓存；KV 缓存写回 / 读取分布式存储</td><td>存储网络带宽（命中率 ≥95% 时）</td><td>上篇 4；本篇 3.3</td></tr><tr><td>6. 一个 Agent</td><td>while 循环：模型 ↔ 工具；上下文压缩、笔记</td><td>每轮上下文长度；工具等待</td><td>上篇 3、5</td></tr><tr><td>7. 多个 Agent</td><td>主 Agent + 并行子 Agent，各自独立上下文</td><td>总 token 数（约 15 倍于聊天）</td><td>本篇 7</td></tr><tr><td>8. 训练</td><td>沙盒里生成轨迹 → 可验证奖励 → GRPO 更新 → 同步权重</td><td>生成阶段（占 70%+）、长尾</td><td>上篇 7；本篇 8</td></tr></tbody></table></div>
+<p>和上篇第 8 节那张"GPT-3 一次前向传播 vs 现代 Agent 一次任务"对照表相比，最大的变化是：<strong>Agent 的"智能"仍然来自第 1、2 层那套固定深度的前向传播；第 3 到第 8 层几乎全是让这套前向传播能被更长、更多、更频繁地调用的工程体系。</strong> 2025–2026 年这几层的进展速度，并不比模型本身慢。</p>
+<hr>
+<h2 id="s11">10. 不确定或没有公开的部分</h2>
+<ul><li>Claude、GPT 等闭源模型：是否用稀疏注意力、线性注意力、MTP，用多少张卡怎么切分，<code>strict</code> 工具调用如何实现——<strong>均未公开</strong>。</li><li>第 2 节单卡算例忽略了激活值、框架开销、显存碎片，带宽按规格表峰值计算，是理想化上限。</li><li>第 4.1 节注意力计算量取的是标准视角，MLA 在不同推理引擎里的实际写法不同，计算量会有约 3 倍的差别（已在补充说明中给出另一口径）。</li><li>第 4.2 节索引器的计算量按全精度乘加次数估算，没有计入 FP8 的实际速度优势和 top-k 选择本身的开销。</li><li>第 8 节生成阶段的占比来自不同论文、不同任务和不同集群，范围较宽（50%–91%），不应当作一个统一的常数。</li></ul>
+<hr>
+<h2 id="s12">来源</h2>
+<ul><li>本站：GPT-3 计算规模、信息流与能耗；LLaMA-3 8B 现代 LLM 架构、计算规模与能耗；LLaMA-3 8B 完整指南；为什么造不出一种"稳定的 Norm"；LLM 白话</li><li>DeepSeek-V3 Technical Report（第 3.4 节部署、第 4.2 节超参数、第 5.4.3 节 MTP）：<a href="https://arxiv.org/abs/2412.19437">https://arxiv.org/abs/2412.19437</a></li><li>DeepSeek-V3.2 论文：<a href="https://arxiv.org/abs/2512.02556">https://arxiv.org/abs/2512.02556</a> ；配置：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2/blob/main/config.json">https://huggingface.co/deepseek-ai/DeepSeek-V3.2/blob/main/config.json</a></li><li>NVIDIA TensorRT-LLM，Optimizing DeepSeek-V3.2 on Blackwell：<a href="https://nvidia.github.io/TensorRT-LLM/blogs/tech_blog/blog15_Optimizing_DeepSeek_V32_on_NVIDIA_Blackwell_GPUs">https://nvidia.github.io/TensorRT-LLM/blogs/tech_blog/blog15_Optimizing_DeepSeek_V32_on_NVIDIA_Blackwell_GPUs</a></li><li>vLLM，DeepSeek-V3.2-Exp in vLLM：<a href="https://vllm.ai/blog/2025-09-29-deepseek-v3-2">https://vllm.ai/blog/2025-09-29-deepseek-v3-2</a></li><li>Qwen3-Next 官方介绍：<a href="https://www.alibabacloud.com/blog/602580">https://www.alibabacloud.com/blog/602580</a></li><li>Gated Delta Networks 论文：<a href="https://arxiv.org/abs/2412.06464">https://arxiv.org/abs/2412.06464</a></li><li>DualPath（Agent 推理的 KV 存储瓶颈）：<a href="https://arxiv.org/abs/2602.21548">https://arxiv.org/abs/2602.21548</a></li><li>XGrammar：<a href="https://arxiv.org/abs/2411.15100">https://arxiv.org/abs/2411.15100</a> ；NVIDIA Guided Decoding 文档</li><li>Claude 文档，Handle tool calls（strict tool use）：<a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls</a></li><li>Anthropic，How we built our multi-agent research system：<a href="https://www.anthropic.com/engineering/multi-agent-research-system">https://www.anthropic.com/engineering/multi-agent-research-system</a></li><li>Anthropic，Code execution with MCP：<a href="https://www.anthropic.com/engineering/code-execution-with-mcp">https://www.anthropic.com/engineering/code-execution-with-mcp</a></li><li>强化学习生成阶段占比：RhymeRL（arXiv 2508.18588）；ROLL Flash（arXiv 2510.11345）；APRIL（arXiv 2509.18521）；Seer（arXiv 2511.14617）；arXiv 2604.26256</li><li>H100 SXM 显存带宽 3.35 TB/s 为 NVIDIA 规格表数值</li></ul>
+<hr>
+<p><a href="agent-compute-1.html">&larr; 上一篇：从 GPT-3 的一次前向传播，到 Agent 的一次完整任务（一）</a></p>
+<p class="subtitle" style="margin-top:2rem">iEnjoy &middot; GPU &amp; LLM Learning Notes</p>
+</div>
+</body>
+</html>
